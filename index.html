@@ -1,0 +1,1789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>FlowFree — Web SPA (Hub + Player)</title>
+  <style>
+    :root{
+      --bg:#0b0c10; --bg-deep:#0e1117; --panel:#13151b; --ink:#e8eaf0; --muted:#9aa3b2; --accent:#5eead4; --accent2:#a78bfa; --grid:#2a2f3a;
+      --heading:#cbd5e1;
+      --badge-bg:rgba(167,139,250,.12);
+      --btn-bg:#1b2031; --btn-border:#293149; --btn-hover-bg:#20263b;
+      --btn-primary-bg:#1b2838; --btn-primary-border:#284b63; --btn-primary-color:#cdeafe;
+      --btn-warn-bg:#2a100f; --btn-warn-border:#552222; --btn-warn-color:#fca5a5;
+      --panel-border:#1e2332; --panel-shadow:0 10px 30px rgba(0,0,0,.25);
+      --input-bg:#0f1220; --input-border:#23283b; --focus-ring:#3b82f6; --focus-shadow:rgba(59,130,246,.2);
+      --border-subtle:#1a2030;
+      --level-bg:#0e1220; --log-bg:#0c0f18; --card-bg:#0f1320; --card-border:#1b2130; --pill-bg:#101422;
+      --canvas-wrap-bg:#0d0f15; --canvas-bg:#0f1320;
+      --stage-locked-bg:#101320; --stage-locked-border:#1e2336; --stage-locked-color:#4b5570;
+      --stage-unlocked-bg:#152040; --stage-unlocked-border:#3b82f6; --stage-unlocked-color:#93c5fd;
+      --stage-unlocked-hover-bg:#1a2d55; --stage-unlocked-hover-border:#60a5fa; --stage-unlocked-shadow:0 0 6px rgba(59,130,246,.15);
+      --stage-done-bg:#0b1f16; --stage-done-border:#166534; --stage-done-color:#bbf7d0;
+      --banner-bg:rgba(16,185,129,.1); --banner-border:rgba(16,185,129,.25); --banner-color:#d1fae5;
+      --pad:16px; --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom);
+    }
+
+    /* ── OLED Black ── */
+    [data-theme="oled"]{
+      --bg:#000000; --bg-deep:#000000; --panel:#0a0a0a; --ink:#f0f0f0; --muted:#808080; --accent:#5eead4; --accent2:#a78bfa; --grid:#1a1a1a;
+      --heading:#d4d4d4;
+      --badge-bg:rgba(167,139,250,.15);
+      --btn-bg:#111111; --btn-border:#222222; --btn-hover-bg:#1a1a1a;
+      --btn-primary-bg:#0d1f2d; --btn-primary-border:#1a3a50; --btn-primary-color:#cdeafe;
+      --btn-warn-bg:#1a0a0a; --btn-warn-border:#3a1515; --btn-warn-color:#fca5a5;
+      --panel-border:#1a1a1a; --panel-shadow:0 10px 30px rgba(0,0,0,.6);
+      --input-bg:#0a0a0a; --input-border:#1a1a1a; --focus-ring:#3b82f6; --focus-shadow:rgba(59,130,246,.25);
+      --border-subtle:#1a1a1a;
+      --level-bg:#050505; --log-bg:#050505; --card-bg:#0a0a0a; --card-border:#1a1a1a; --pill-bg:#0a0a0a;
+      --canvas-wrap-bg:#000000; --canvas-bg:#000000;
+      --stage-locked-bg:#0a0a0a; --stage-locked-border:#1a1a1a; --stage-locked-color:#555555;
+      --stage-unlocked-bg:#0a1530; --stage-unlocked-border:#3b82f6; --stage-unlocked-color:#93c5fd;
+      --stage-unlocked-hover-bg:#0f2040; --stage-unlocked-hover-border:#60a5fa; --stage-unlocked-shadow:0 0 6px rgba(59,130,246,.2);
+      --stage-done-bg:#051510; --stage-done-border:#166534; --stage-done-color:#bbf7d0;
+      --banner-bg:rgba(16,185,129,.12); --banner-border:rgba(16,185,129,.3); --banner-color:#d1fae5;
+    }
+
+    /* ── Light (warm gray) ── */
+    [data-theme="light"]{
+      --bg:#f5f2ed; --bg-deep:#ebe7e0; --panel:#ffffff; --ink:#1a1a1a; --muted:#6b6560; --accent:#0d9488; --accent2:#7c3aed; --grid:#c5c0b8;
+      --heading:#2d2a26;
+      --badge-bg:rgba(124,58,237,.1);
+      --btn-bg:#eae6df; --btn-border:#d0ccc5; --btn-hover-bg:#ddd8d0;
+      --btn-primary-bg:#dbeafe; --btn-primary-border:#93c5fd; --btn-primary-color:#1e40af;
+      --btn-warn-bg:#fef2f2; --btn-warn-border:#fca5a5; --btn-warn-color:#b91c1c;
+      --panel-border:#d5d0c8; --panel-shadow:0 4px 12px rgba(0,0,0,.08);
+      --input-bg:#ffffff; --input-border:#c5c0b8; --focus-ring:#3b82f6; --focus-shadow:rgba(59,130,246,.15);
+      --border-subtle:#d5d0c8;
+      --level-bg:#faf8f5; --log-bg:#faf8f5; --card-bg:#faf8f5; --card-border:#d5d0c8; --pill-bg:#f0ece6;
+      --canvas-wrap-bg:#ede9e0; --canvas-bg:#f5f2ed;
+      --stage-locked-bg:#eae6df; --stage-locked-border:#d0ccc5; --stage-locked-color:#9a9590;
+      --stage-unlocked-bg:#dbeafe; --stage-unlocked-border:#3b82f6; --stage-unlocked-color:#1d4ed8;
+      --stage-unlocked-hover-bg:#bfdbfe; --stage-unlocked-hover-border:#2563eb; --stage-unlocked-shadow:0 0 6px rgba(59,130,246,.15);
+      --stage-done-bg:#dcfce7; --stage-done-border:#22c55e; --stage-done-color:#166534;
+      --banner-bg:rgba(16,185,129,.12); --banner-border:rgba(16,185,129,.3); --banner-color:#065f46;
+    }
+
+    /* ── White (pure) ── */
+    [data-theme="white"]{
+      --bg:#ffffff; --bg-deep:#fafafa; --panel:#ffffff; --ink:#111111; --muted:#707070; --accent:#0d9488; --accent2:#7c3aed; --grid:#d4d4d4;
+      --heading:#222222;
+      --badge-bg:rgba(124,58,237,.08);
+      --btn-bg:#f5f5f5; --btn-border:#d4d4d4; --btn-hover-bg:#ebebeb;
+      --btn-primary-bg:#eff6ff; --btn-primary-border:#93c5fd; --btn-primary-color:#1e40af;
+      --btn-warn-bg:#fff5f5; --btn-warn-border:#fca5a5; --btn-warn-color:#b91c1c;
+      --panel-border:#e0e0e0; --panel-shadow:0 2px 8px rgba(0,0,0,.06);
+      --input-bg:#ffffff; --input-border:#d4d4d4; --focus-ring:#3b82f6; --focus-shadow:rgba(59,130,246,.12);
+      --border-subtle:#e0e0e0;
+      --level-bg:#fafafa; --log-bg:#fafafa; --card-bg:#fafafa; --card-border:#e0e0e0; --pill-bg:#f0f0f0;
+      --canvas-wrap-bg:#f0f0f0; --canvas-bg:#ffffff;
+      --stage-locked-bg:#f5f5f5; --stage-locked-border:#d4d4d4; --stage-locked-color:#999999;
+      --stage-unlocked-bg:#eff6ff; --stage-unlocked-border:#3b82f6; --stage-unlocked-color:#1d4ed8;
+      --stage-unlocked-hover-bg:#dbeafe; --stage-unlocked-hover-border:#2563eb; --stage-unlocked-shadow:0 0 6px rgba(59,130,246,.12);
+      --stage-done-bg:#f0fdf4; --stage-done-border:#22c55e; --stage-done-color:#166534;
+      --banner-bg:rgba(16,185,129,.1); --banner-border:rgba(16,185,129,.25); --banner-color:#065f46;
+    }
+
+    *{ box-sizing:border-box }
+    html{ background:var(--bg) }
+    html,body{ height:100% }
+    body{
+      margin:0; color:var(--ink);
+      background:linear-gradient(180deg,var(--bg) 0%, var(--bg-deep) 100%);
+      font-family:ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;
+      display:flex; flex-direction:column; align-items:center;
+      -webkit-user-select:none; user-select:none; touch-action: pan-y;
+      padding-bottom:var(--safe-bottom);
+      overflow-x:hidden;
+    }
+    header{ width:100%; max-width:1100px; display:flex; align-items:center; justify-content:space-between; padding:18px var(--pad); padding-top:calc(18px + var(--safe-top)); }
+    h1{ font-size:22px; margin:0 }
+    .badge{ padding:4px 8px; border-radius:999px; background:var(--badge-bg); color:var(--accent2); font-weight:600; font-size:12px }
+    .row{ display:flex; gap:8px; flex-wrap:wrap }
+    .btn{ background:var(--btn-bg); border:1px solid var(--btn-border); color:var(--ink); border-radius:10px; padding:10px 12px; cursor:pointer; font-weight:600 }
+    .btn:hover{ background:var(--btn-hover-bg) }
+    .btn.primary{ background:var(--btn-primary-bg); border-color:var(--btn-primary-border); color:var(--btn-primary-color) }
+    .btn.warn{ background:var(--btn-warn-bg); border-color:var(--btn-warn-border); color:var(--btn-warn-color) }
+    .small{ font-size:12px; color:var(--muted) }
+    .wrap{ width:100%; max-width:1100px; padding:0 var(--pad) 16px }
+    .panel{ background:var(--panel); border:1px solid var(--panel-border); border-radius:16px; box-shadow:var(--panel-shadow) }
+    .panel .inner{ padding:16px }
+    input{ background:var(--input-bg); color:var(--ink); border:1px solid var(--input-border); border-radius:10px; padding:10px 12px; outline:none }
+    input:focus{ border-color:var(--focus-ring); box-shadow:0 0 0 3px var(--focus-shadow) }
+    label{ font-size:12px; color:var(--muted) }
+    .status{ font-size:12px; color:var(--muted); min-height:20px }
+    .grid{ display:grid; grid-template-columns:repeat(12,1fr); gap:10px }
+    .col-3{ grid-column:span 3 } .col-4{ grid-column:span 4 } .col-6{ grid-column:span 6 } .col-12{ grid-column:span 12 }
+    .levels{ display:flex; flex-direction:column; gap:16px }
+    .level{ background:var(--level-bg); border:1px solid var(--border-subtle); border-radius:14px; padding:12px }
+    .level h3{ margin:0 0 10px 0; font-size:14px; color:var(--heading) }
+    .stage-row{ display:flex; flex-wrap:wrap; gap:8px }
+    .stage{ padding:8px 10px; border:1px solid var(--stage-locked-border); background:var(--stage-locked-bg); color:var(--stage-locked-color); border-radius:10px; cursor:default }
+    .stage[disabled]{ cursor:not-allowed }
+    .stage:not([disabled]):not(.done){ border-color:var(--stage-unlocked-border); background:var(--stage-unlocked-bg); color:var(--stage-unlocked-color); cursor:pointer; box-shadow:var(--stage-unlocked-shadow) }
+    .stage:not([disabled]):not(.done):hover{ background:var(--stage-unlocked-hover-bg); border-color:var(--stage-unlocked-hover-border) }
+    .stage.done{ border-color:var(--stage-done-border); background:var(--stage-done-bg); color:var(--stage-done-color); cursor:pointer }
+    .log{ margin-top:8px; padding:8px; height:200px; overflow:auto; background:var(--log-bg); border:1px solid var(--border-subtle); border-radius:10px; font:12px ui-monospace, SFMono-Regular, Menlo, monospace }
+    .game-wrap{ display:grid; grid-template-columns: 1fr 360px; gap:16px; padding:16px }
+    .canvas-wrap{
+      position:relative; background:var(--canvas-wrap-bg); border-radius:16px; padding:12px;
+      display:flex; align-items:center; justify-content:center;
+      justify-self:center;
+      overflow:hidden;
+    }
+    canvas{ background:var(--canvas-bg); border-radius:12px; display:block }
+    #board{ z-index:2; touch-action:none; position:relative }
+    #confetti{ background:transparent !important; border-radius:0 !important; box-shadow:none !important; position:absolute; top:0; left:0; pointer-events:none; touch-action:auto; z-index:3 }
+    .sidebar{ display:flex; flex-direction:column; gap:12px }
+    .card{ background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:12px }
+    .card h3{ margin:0 0 8px 0; font-size:14px; color:var(--heading) }
+    .plog{ height:220px; overflow:auto; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; color:var(--heading); padding:8px; background:var(--log-bg); border:1px solid var(--border-subtle); border-radius:10px; -webkit-overflow-scrolling:touch }
+    .pill{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background:var(--pill-bg); border:1px solid var(--border-subtle); font-size:12px }
+    .mobile-toolbar{ display:none }
+    .banner{ position:absolute; inset:0; display:none; align-items:center; justify-content:center; z-index:4 }
+    .banner.show{ display:flex }
+    .banner-inner{ padding:14px 16px; background:var(--banner-bg); border:1px solid var(--banner-border); color:var(--banner-color); border-radius:12px; backdrop-filter: blur(6px) }
+    /* Theme picker */
+    .theme-btn{
+      display:inline-flex; align-items:center; gap:6px;
+      padding:6px 10px; border-radius:8px;
+      background:var(--btn-bg); border:1px solid var(--btn-border);
+      color:var(--muted); font-size:12px; cursor:pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .theme-btn:hover{ background:var(--btn-hover-bg) }
+    .theme-btn.active{ border-color:var(--accent); color:var(--ink); box-shadow:0 0 0 2px rgba(94,234,212,.2) }
+    .theme-swatch{ width:18px; height:18px; border-radius:50%; border:2px solid; display:inline-block; flex-shrink:0 }
+    .theme-label{ font-weight:500 }
+    [data-view]{ display:none }
+    [data-view].show{ display:block }
+    body{ font-size:clamp(14px,1.6vw,16px) }
+    h1{ font-size:clamp(18px,2.6vw,22px) }
+    @media (max-width: 980px){
+      .game-wrap{ grid-template-columns:1fr; gap:12px; padding:12px }
+      .sidebar{ order:2 }
+      .canvas-wrap{ order:1 }
+    }
+    @media (max-width: 640px){
+      :root{ --pad:10px }
+      header{ padding:10px var(--pad); padding-top:calc(10px + var(--safe-top)); flex-wrap:wrap; gap:8px }
+      h1{ font-size:18px }
+      .badge{ font-size:11px; padding:3px 6px }
+      #btnClear{ display:none }
+      .panel{ border-radius:12px }
+      .panel .inner{ padding:10px }
+      .game-wrap{ gap:8px; padding:8px }
+      .canvas-wrap{ padding:6px; border-radius:10px }
+      .sidebar .card.howtoplay{ display:none }
+      .plog, .log{ height:120px; font-size:11px }
+      .card{ padding:10px }
+      .card h3{ font-size:13px; margin-bottom:6px }
+      .stage-row{ gap:6px }
+      .stage{ padding:10px 12px; border-radius:10px; flex:1 1 calc(50% - 6px); text-align:center; font-size:13px }
+      .grid{ gap:8px }
+      .col-4{ grid-column:span 12 }
+      input{ padding:10px; font-size:14px }
+      .btn{ padding:10px; font-size:13px }
+      .levels{ gap:10px }
+      .level{ padding:10px }
+
+      /* Player view: near-fullscreen canvas */
+      #view-player{ padding:0; border:none; border-radius:0; box-shadow:none; background:transparent }
+      #view-player .inner{ padding:0 }
+      #view-player .game-wrap{ padding:4px; gap:6px }
+      #view-player .canvas-wrap{ padding:4px; border-radius:8px }
+      #view-player .sidebar{ display:none }
+      .mobile-toolbar{
+        display:flex; justify-content:center; gap:6px; padding:6px 4px;
+        order:2;
+      }
+      .mobile-toolbar .btn{ padding:8px 12px; font-size:12px; flex:1; text-align:center }
+    }
+  </style>
+  <script>
+    // Apply theme immediately to prevent flash of wrong colors
+    (function(){
+      var t = localStorage.getItem('apflowfree-theme');
+      if (t && t !== 'dark-blue') document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+</head>
+<body>
+  <header>
+    <div style="display:flex; align-items:center; gap:10px">
+      <span class="badge">FlowFree</span>
+      <h1 id="title">Hub — Login & Menu</h1>
+    </div>
+    <div class="row">
+      <button class="btn" id="btnClear">Clear saved config</button>
+      <button class="btn" id="btnBack" style="display:none">← Back to Menu</button>
+    </div>
+  </header>
+
+  <!-- ===== HUB VIEW (Login + Menu) ===== -->
+  <section class="wrap panel" data-view id="view-hub">
+    <div class="inner">
+      <div class="grid" id="loginGrid">
+        <div class="col-4">
+          <label for="address">Server Address</label>
+          <input id="address" placeholder="archipelago.gg:38281" />
+        </div>
+        <div class="col-4">
+          <label for="slot">Slot Name</label>
+          <input id="slot" placeholder="MySlot" />
+        </div>
+        <div class="col-4">
+          <label for="password">Password (optional)</label>
+          <input id="password" type="password" />
+        </div>
+        <div class="col-12 row">
+          <button class="btn primary" id="btnConnect">Connect</button>
+          <button class="btn" id="btnTryout">Try it out</button>
+          <span class="status" id="status"></span>
+        </div>
+      </div>
+
+      <div id="menu" style="display:none">
+        <div class="row" style="align-items:center; justify-content:space-between">
+          <div class="small" id="menuInfo">—</div>
+          <div class="row">
+            <button class="btn" id="btnResync">Resync</button>
+            <button class="btn" id="btnDisconnect">Disconnect</button>
+          </div>
+        </div>
+        <div class="levels" id="levels"></div>
+        <div class="log" id="hubLog"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== TRYOUT VIEW ===== -->
+  <section class="wrap panel" data-view id="view-tryout">
+    <div class="inner">
+      <div class="row" style="align-items:center; justify-content:space-between; margin-bottom:12px">
+        <div class="small">Pick a puzzle — no server needed!</div>
+        <button class="btn" id="btnTryoutBack">← Back</button>
+      </div>
+      <div class="levels" id="tryoutLevels"></div>
+    </div>
+  </section>
+
+  <!-- ===== PLAYER VIEW ===== -->
+  <section class="wrap panel" data-view id="view-player">
+    <div class="inner">
+      <section class="game-wrap">
+        <div class="canvas-wrap" id="canvasWrap">
+          <canvas id="board" width="600" height="600"></canvas>
+          <div class="banner" id="winBanner"><div class="banner-inner">Puzzle Complete!</div></div>
+          <canvas id="confetti" width="600" height="600"></canvas>
+        </div>
+        <div class="mobile-toolbar">
+          <button class="btn" id="mobilePrev">← Prev</button>
+          <button class="btn" id="mobileBack">Back</button>
+          <button class="btn" id="mobileReset">Reset</button>
+          <button class="btn" id="mobileNext">Next →</button>
+        </div>
+        <aside class="sidebar">
+          <div class="card howtoplay">
+            <h3>How to play</h3>
+            <ul class="small" style="margin:0 0 6px 16px">
+              <li>Click a colored circle to select a color.</li>
+              <li>Drag orthogonally to connect matching circles.</li>
+              <li>Paths can be rewound by dragging back over them.</li>
+              <li>Fill every cell and connect all pairs to win.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Log</h3>
+            <div class="plog" id="playerLog"></div>
+          </div>
+          <div class="card">
+            <h3>From server</h3>
+            <div class="small" id="serverInfo">Loading…</div>
+            <div class="row" style="margin-top:8px; flex-wrap:wrap; gap:8px">
+  			  <button class="btn" id="prevBtn">Previous puzzle</button>
+  			  <button class="btn" id="nextBtn">Next puzzle</button>
+			</div>
+            <div class="row" style="margin-top:8px">
+              <button class="btn" id="resetBtn">Reset board</button>
+              <button class="btn" id="exportBtn">Export puzzle JSON</button>
+            </div>
+          </div>
+        </aside>
+      </section>
+    </div>
+  </section>
+
+  <div id="themePicker" style="display:flex; align-items:center; justify-content:center; gap:10px; padding:12px 16px; flex-wrap:wrap">
+    <span style="font-size:12px; color:var(--muted); margin-right:4px">Theme</span>
+    <button class="theme-btn" data-theme-id="dark-blue" title="Dark Blue"><span class="theme-swatch" style="background:#0b0c10; border-color:#2a2f3a"></span><span class="theme-label">Dark</span></button>
+    <button class="theme-btn" data-theme-id="oled" title="OLED Black"><span class="theme-swatch" style="background:#000000; border-color:#222"></span><span class="theme-label">OLED</span></button>
+    <button class="theme-btn" data-theme-id="light" title="Light"><span class="theme-swatch" style="background:#f5f2ed; border-color:#c5c0b8"></span><span class="theme-label">Light</span></button>
+    <button class="theme-btn" data-theme-id="white" title="White"><span class="theme-swatch" style="background:#ffffff; border-color:#d4d4d4"></span><span class="theme-label">White</span></button>
+  </div>
+  <div class="small" style="padding:0 16px 8px; text-align:center">Please report issues on GitHub or feel free to post in the Archipelago Discord thread.</div>
+
+<script>
+"use strict";
+
+/********************************
+ * Theme system
+ ********************************/
+const THEMES = {
+  'dark-blue': {
+    gridLine:'#2e3444', pipeShadow:'#111826', circleStroke:'#222733', canvasBg:'#0f1320',
+    colorMapping:{'1':'#ef4444','2':'#22c55e','3':'#3b82f6','4':'#eab308','5':'#f97316','6':'#a855f7','7':'#ec4899','8':'#06b6d4','9':'#d946ef','a':'#f0e68c','b':'#1f2937','c':'#e6e6fa','d':'#800000','e':'#ff7f50','f':'#fa8072'},
+    confettiColors:['#ef4444','#22c55e','#3b82f6','#eab308','#f97316','#a855f7','#ec4899','#14b8a6'],
+    logColors:{ progression:'#AF99EF', useful:'#6D8BE8', trap:'#FA8072', filler:'#00EEEE', selfPlayer:'#EE00EE', otherPlayer:'#FAFAD2', location:'#00FF7F' }
+  },
+  'oled': {
+    gridLine:'#1a1a1a', pipeShadow:'#000000', circleStroke:'#1a1a1a', canvasBg:'#000000',
+    colorMapping:{'1':'#ef4444','2':'#22c55e','3':'#3b82f6','4':'#eab308','5':'#f97316','6':'#a855f7','7':'#ec4899','8':'#06b6d4','9':'#d946ef','a':'#f0e68c','b':'#1f2937','c':'#e6e6fa','d':'#800000','e':'#ff7f50','f':'#fa8072'},
+    confettiColors:['#ef4444','#22c55e','#3b82f6','#eab308','#f97316','#a855f7','#ec4899','#14b8a6'],
+    logColors:{ progression:'#c4b0ff', useful:'#8aa4ff', trap:'#ff9090', filler:'#33ffff', selfPlayer:'#ff33ff', otherPlayer:'#fffff0', location:'#33ff88' }
+  },
+  'light': {
+    gridLine:'#c5c0b8', pipeShadow:'#d0ccc4', circleStroke:'#b0a898', canvasBg:'#f5f2ed',
+    colorMapping:{'1':'#ef4444','2':'#22c55e','3':'#3b82f6','4':'#eab308','5':'#f97316','6':'#a855f7','7':'#ec4899','8':'#06b6d4','9':'#d946ef','a':'#f0e68c','b':'#1f2937','c':'#e6e6fa','d':'#800000','e':'#ff7f50','f':'#fa8072'},
+    confettiColors:['#ef4444','#22c55e','#3b82f6','#eab308','#f97316','#a855f7','#ec4899','#14b8a6'],
+    logColors:{ progression:'#7c3aed', useful:'#2563eb', trap:'#dc2626', filler:'#0891b2', selfPlayer:'#c026d3', otherPlayer:'#92400e', location:'#15803d' }
+  },
+  'white': {
+    gridLine:'#d4d4d4', pipeShadow:'#e0e0e0', circleStroke:'#c0c0c0', canvasBg:'#ffffff',
+    colorMapping:{'1':'#ef4444','2':'#22c55e','3':'#3b82f6','4':'#eab308','5':'#f97316','6':'#a855f7','7':'#ec4899','8':'#06b6d4','9':'#d946ef','a':'#f0e68c','b':'#1f2937','c':'#e6e6fa','d':'#800000','e':'#ff7f50','f':'#fa8072'},
+    confettiColors:['#ef4444','#22c55e','#3b82f6','#eab308','#f97316','#a855f7','#ec4899','#14b8a6'],
+    logColors:{ progression:'#7c3aed', useful:'#1d4ed8', trap:'#b91c1c', filler:'#0e7490', selfPlayer:'#a21caf', otherPlayer:'#78350f', location:'#166534' }
+  }
+};
+const THEME_LS_KEY = 'apflowfree-theme';
+let currentThemeKey = 'dark-blue';
+let currentTheme = THEMES['dark-blue'];
+
+function applyTheme(themeKey){
+  if (!THEMES[themeKey]) themeKey = 'dark-blue';
+  currentThemeKey = themeKey;
+  currentTheme = THEMES[themeKey];
+  if (themeKey === 'dark-blue') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', themeKey);
+  document.querySelectorAll('.theme-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.themeId === themeKey);
+  });
+  localStorage.setItem(THEME_LS_KEY, themeKey);
+  if (typeof Player !== 'undefined' && Player.redraw) try{ Player.redraw(); }catch(e){}
+}
+
+// Wire up theme picker buttons
+document.addEventListener('DOMContentLoaded', function(){
+  document.querySelectorAll('.theme-btn').forEach(btn => {
+    btn.addEventListener('click', () => applyTheme(btn.dataset.themeId));
+  });
+});
+
+/********************************
+ * View/router helpers (SPA)
+ ********************************/
+
+let tryoutMode = false;
+
+function showView(id){
+  for(const el of document.querySelectorAll('[data-view]')) el.classList.remove('show');
+  document.getElementById(id).classList.add('show');
+  document.getElementById('btnBack').style.display = (id==='view-player')? 'inline-block':'none';
+  const titles = { 'view-player':'Puzzle', 'view-hub':'Hub — Login & Menu', 'view-tryout':'Try it out' };
+  document.getElementById('title').textContent = titles[id] || 'FlowFree';
+  // On mobile, hide header when playing to maximize canvas space
+  const isMobile = window.innerWidth <= 640;
+  document.querySelector('header').style.display = (isMobile && id === 'view-player') ? 'none' : '';
+  // Scroll to top so the puzzle/view is visible
+  window.scrollTo(0, 0);
+}
+
+/********************************
+ * Local storage helpers
+ ********************************/
+const LS_PREFIX = 'FF_HUB_';
+const CFG_KEY = LS_PREFIX + 'config';
+
+// In-memory progress cache (per slot)
+let progressMem = {}; // { [slot]: { "Level X": { "stageIdx": {color->path} } } }
+function getProgress(slot){ return progressMem[slot] || {}; }
+function setProgress(slot, data){ progressMem[slot] = data || {}; }
+
+function saveConfig(cfg){ localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
+function loadConfig(){ try{ return JSON.parse(localStorage.getItem(CFG_KEY)||'{}') }catch{ return {} } }
+
+
+function itemNameFromId(id){ return idToItemName[Number(id)] || `Item#${id}`; }
+function locationNameFromId(id){ return idToLocationName[Number(id)] || `Loc#${id}`; }
+
+/********************************
+ * Logging
+ ********************************/
+function hubLog(msg){ const el=document.getElementById('hubLog'); const t=new Date().toLocaleTimeString(); el.innerHTML += `[${t}] ${msg}<br>`; el.scrollTop=el.scrollHeight }
+function playerLog(msg){ const el=document.getElementById('playerLog'); const t=new Date().toLocaleTimeString(); el.innerHTML += `[${t}] ${msg}<br>`; el.scrollTop=el.scrollHeight }
+
+/********************************
+ * Persistent WebSocket (singleton)
+ ********************************/
+class WSManager{
+  #ws=null; #url=null; #reconnect=true; #listeners=new Set();
+  connect(addr, slot, password){
+    this.#url = (addr.startsWith('ws://')||addr.startsWith('wss://'))? addr : ('ws://'+addr);
+    return new Promise((resolve)=>{
+      try{ this.#ws = new WebSocket(this.#url); }catch(err){ updateStatus('Failed to open websocket: '+err.message, true); return }
+      this.#ws.onopen = () => {
+        this.send([{
+          cmd:'Connect', password, name:slot,
+          version:{build:0, class:'Version', major:0, minor:5},
+          tags:'', items_handling: 0b011, uuid:'APFlowFreeWeb', game:'APFlowFree', slot_data:true
+        }]);
+        resolve();
+      };
+      this.#ws.onmessage = (ev)=>{ for(const cb of this.#listeners) cb(JSON.parse(ev.data)); };
+      this.#ws.onclose = ()=>{ updateStatus('Socket closed', true); if(this.#reconnect){ const d=Math.min(30000,(this._tries=(this._tries||0)+1)*1000); setTimeout(()=> this.#reopen(), d); } };
+      this.#ws.onerror = (e)=>{ updateStatus('Socket error', true); console.warn(e); };
+    });
+  }
+  #reopen(){
+    if(!this.#url) return;
+    try{ this.#ws = new WebSocket(this.#url); }catch(err){ updateStatus('Reconnect failed: '+err.message, true); return }
+    this.#ws.onopen = ()=>{ this._tries=0; updateStatus('Reconnected.'); try { resendAllFulfilledChecks(); } catch {} };
+    this.#ws.onmessage = (ev)=>{ for(const cb of this.#listeners) cb(JSON.parse(ev.data)); };
+    this.#ws.onclose = ()=>{ if(this.#reconnect){ const d=Math.min(30000,(this._tries=(this._tries||0)+1)*1000); setTimeout(()=> this.#reopen(), d); } };
+    this.#ws.onerror = (e)=> console.warn('ws error', e);
+  }
+  send(payload){ if(this.#ws && this.#ws.readyState===WebSocket.OPEN){ this.#ws.send(JSON.stringify(payload)); } }
+  onMessage(cb){ this.#listeners.add(cb); return ()=> this.#listeners.delete(cb); }
+  close(){ try{ this.#reconnect=false; this.#ws?.close(); }catch{} }
+}
+const WS = new WSManager();
+
+/********************************
+ * AP protocol + Hub state
+ ********************************/
+let isConnected=false; let currentSlot=''; let mySlotNumber=null;
+let slot_data={}; let slot_map={};
+let itemNameToId={}; let locationNameToId = {};
+
+// Stores lock/unlock status for all levels and stages
+let LEVEL_STATUS = {};
+
+let idToItemName = {};       // APFlowFree-only reverse map
+let idToLocationName = {};   // APFlowFree-only reverse map
+let allGameItems = {};       // { gameName: { id: name } } — all games, for cross-game display
+let allGameLocations = {};   // { gameName: { id: name } } — all games, for cross-game display
+let unlockItemIds = new Set(); // <- IDs for "Level N Stages" items
+let PENDING_RECEIVED_ITEMS = []; // queue when DataPackage not ready
+
+function buildReverseMaps(){
+  // Build APFlowFree-only reverse maps + unlockItemIds
+  idToItemName = {};
+  idToLocationName = {};
+  unlockItemIds = new Set();
+  try{
+    for (const [name, id] of Object.entries(itemNameToId || {})) {
+      const num = Number(id);
+      idToItemName[num] = name;
+      if (/^Level\s+\d+\s+Stages$/i.test(name)) unlockItemIds.add(num);
+    }
+    for (const [name, id] of Object.entries(locationNameToId || {})) {
+      idToLocationName[Number(id)] = name;
+    }
+  }catch{}
+}
+
+// Look up an item name by ID for a specific game (falls back to APFlowFree, then raw ID)
+function itemNameByGame(id, gameName){
+  const num = Number(id);
+  if (gameName && allGameItems[gameName] && allGameItems[gameName][num]) return allGameItems[gameName][num];
+  return idToItemName[num] || `Item#${id}`;
+}
+function locationNameByGame(id, gameName){
+  const num = Number(id);
+  if (gameName && allGameLocations[gameName] && allGameLocations[gameName][num]) return allGameLocations[gameName][num];
+  return idToLocationName[num] || `Loc#${id}`;
+}
+
+// Build LEVEL_STATUS from slot_data counts
+function initLevelStatusFromSlotData() {
+  const n = Number(slot_data.number_of_levels || 0);
+  const s = Number(slot_data.stages_per_level || 0);
+
+  LEVEL_STATUS = {};
+  for (let i = 1; i <= n; i++) {
+      const lvlName = `Level ${i}`;
+      const stages = {};
+      for (let j = 1; j <= s; j++) stages[j] = {locked: true};
+      LEVEL_STATUS[lvlName] = {locked: true, stages};
+  }
+  // Unlock all of level 1 stages
+  LEVEL_STATUS["Level 1"].locked = false;
+  for (let j = 1; j <= s; j++) LEVEL_STATUS["Level 1"].stages[j].locked = false;
+
+}
+
+function processUnlocksForItems(items){
+  for (const it of items){
+    const id = Number(it.item);
+    const name = idToItemName[id];
+    if (!name) continue;
+    applyUnlockFromItemName(name);
+  }
+}
+
+function unlockLevel(levelName){
+  if (!LEVEL_STATUS[levelName]) return;
+  LEVEL_STATUS[levelName].locked = false;
+  // When whole level unlocks, unlock all its stages:
+  for (const k in LEVEL_STATUS[levelName].stages){
+    LEVEL_STATUS[levelName].stages[k].locked = false;
+  }
+}
+
+function unlockStage(levelName, stageIndex){
+  if (!LEVEL_STATUS[levelName]) return;
+  LEVEL_STATUS[levelName].locked = false; // entering the level is now allowed
+  if (!LEVEL_STATUS[levelName].stages[stageIndex]) return;
+  LEVEL_STATUS[levelName].stages[stageIndex].locked = false;
+}
+
+function unlockStageRange(levelName, startIdx, endIdx){
+  if (!LEVEL_STATUS[levelName]) return;
+  LEVEL_STATUS[levelName].locked = false; // level becomes accessible
+  for (let i = startIdx; i <= endIdx; i++){
+    if (LEVEL_STATUS[levelName].stages[i]) LEVEL_STATUS[levelName].stages[i].locked = false;
+  }
+}
+
+// Split the level into halves. For odd counts, first half = floor(n/2).
+function getHalfRangesForLevel(levelName){
+  const s = Number(slot_data.stages_per_level || 0);
+  const firstEnd  = Math.floor(s/2);
+  const secondBeg = firstEnd + 1;
+  return { first: [1, Math.max(1, firstEnd)], second: [Math.min(s, secondBeg), s] };
+}
+
+// Parse the APFlowFree item name and unlock accordingly
+function applyUnlockFromItemName(itemName){
+  if (!itemName || typeof itemName !== 'string') return false;
+
+  let m;
+  if ((m = itemName.match(/^Level\s+(\d+)\s+Stages$/i))){
+    const L = `Level ${Number(m[1])}`;
+    unlockLevel(L);
+    return true;
+  }
+  if ((m = itemName.match(/^Level\s+(\d+)\s+Stages\s+First\s+Half$/i))){
+    const L = `Level ${Number(m[1])}`;
+    const [a,b] = getHalfRangesForLevel(L).first;
+    unlockStageRange(L, a, b);
+    return true;
+  }
+  if ((m = itemName.match(/^Level\s+(\d+)\s+Stages\s+Second\s+Half$/i))){
+    const L = `Level ${Number(m[1])}`;
+    const [a,b] = getHalfRangesForLevel(L).second;
+    unlockStageRange(L, a, b);
+    return true;
+  }
+  if ((m = itemName.match(/^Level\s+(\d+)\s+Stage\s+(\d+)$/i))){
+    const L = `Level ${Number(m[1])}`;
+    const S = Number(m[2]);
+    unlockStage(L, S);
+    return true;
+  }
+  // ignore fillers/unknowns
+  return false;
+}
+
+function isLevelUnlocked(levelName) {
+  return !!(LEVEL_STATUS[levelName] && LEVEL_STATUS[levelName].locked === false);
+}
+function isStageUnlocked(levelName, stageIndex) {
+  const L = LEVEL_STATUS[levelName];
+  if (!L) return false;
+  // Stage is usable only if both the level AND that stage are unlocked
+  return L.locked === false && L.stages?.[stageIndex]?.locked === false;
+}
+
+function locIdByName(name){
+  const id = locationNameToId?.[name];
+  return (id!=null) ? Number(id) : null;
+}
+
+// Location name builders
+function locName_LevelComplete(levelName){ return `Complete ${levelName}`; }
+function locName_LevelCheck2(levelName){ return `Complete ${levelName} Check 2`; }
+function locName_StageComplete(levelNum, stageIdx1){
+  return `Level ${levelNum} Stage ${stageIdx1} Complete`;
+}
+
+function titleCase(s){
+  if (!s) return '';
+  return String(s).replace(/\b[a-z]/g, m => m.toUpperCase());
+}
+
+function slotDisplay(slotId){
+  const s = slot_map[String(slotId)] || {};
+  const game = s.game ? ` (${titleCase(s.game)})` : '';
+  return s.slot_name ? `${s.slot_name}${game}` : `Slot ${slotId}`;
+}
+
+function resolveApFlowFreeItemLabel(itemId){
+  const id = Number(itemId);
+  const raw = idToItemName[id];
+  if (raw) {
+    if (/^Level\s+\d+\s+Stages$/i.test(raw)) return raw; // exact unlock item
+    if (/^Flow Bonus$/i.test(raw)) return 'Flow Bonus';
+    // If APFlowFree ever adds other named items, show them verbatim:
+    return raw;
+  }
+  // No mapping yet (shouldn't happen if we defer); safe fallback:
+  return unlockItemIds.has(id) ? 'Level Stages' : 'Flow Bonus';
+}
+
+function logReceivedItems(items){
+  if (!items || !items.length) return;
+  const lines = items.map(it => {
+    const label  = resolveApFlowFreeItemLabel(it.item);
+    return `• ${label} received from ${slotDisplay(it.player)}`;
+  });
+  const header = `Received ${items.length} item${items.length>1?'s':''}:`;
+  hubLog(header + '<br>' + lines.join('<br>'));
+  playerLog(header + '<br>' + lines.join('<br>'));
+}
+
+function updateStatus(txt, warn=false){ const el=document.getElementById('status'); el.textContent=txt; el.style.color = warn? currentTheme.logColors.trap : ''; hubLog(txt) }
+
+function requestSavedProgress(){ const keyName = `FlowFree_${currentSlot}_completed_levels`; WS.send([{cmd:'Get', keys:[keyName]}]); }
+function pushSavedProgressToServer(){
+  const keyName = `FlowFree_${currentSlot}_completed_levels`;
+  const progress = getProgress(currentSlot) || {};
+  WS.send([{ cmd:'Set', key:keyName, want_reply:false, default:{}, operations:[{operation:'replace', value:progress}] }]);
+}
+
+function getLevelInfo(){
+  const nLevels = Number(slot_data.number_of_levels || 10);
+  const stagesPer = Number(slot_data.stages_per_level || 10);
+  const checksPer = Number(slot_data.checks_per_level || 1);
+  const seeds = slot_data.seeds || {};
+  return { nLevels, stagesPer, checksPer, seeds };
+}
+
+function isStrictNoSelfParallel() {
+  return Number(slot_data.strict_mode || 1) === 2;
+}
+
+function getStageSanity(){
+  return Number(slot_data.stage_sanity || 1); // 1=level, 2=halves, 3=per-stage
+}
+
+function sendLocationChecks(ids){
+  if(!ids || !ids.length) return;
+  WS.send([{ cmd: 'LocationChecks', locations: ids.map(Number) }]);
+
+  for (const id of ids){
+    const name = idToLocationName[Number(id)] || `Location ${id}`;
+    hubLog(`Checked: ${name}`);
+    playerLog(`Checked: ${name}`);
+  }
+}
+
+function locationsToSendAfterStage(levelName, stageIdx0){
+  const { stagesPer } = getLevelInfo();
+  const sanity = getStageSanity();
+  const stageIdx1 = Number(stageIdx0) + 1;
+
+  const out = [];
+
+  // Count completed stages for this level (from saved progress)
+  const progress = getProgress(currentSlot) || {};
+  const levelStages = progress[levelName] || {};
+  const completedCount = Object.keys(levelStages).length;
+
+  if (sanity === 3){
+    // Per-stage check: "Level N Stage K Complete"
+    const m = levelName.match(/Level\s+(\d+)/i);
+    if (m){
+      const Lnum = Number(m[1]);
+      const name = locName_StageComplete(Lnum, stageIdx1);
+      const id = locIdByName(name);
+      if (id != null) out.push(id);
+    }
+  } else if (sanity === 2){
+    // Halves: first half threshold, then full level
+    const firstHalf = Math.floor(stagesPer / 2);
+    // If we JUST reached first half, send "Complete Level N"
+    if (completedCount === firstHalf){
+      const id1 = locIdByName(locName_LevelComplete(levelName));
+      if (id1 != null) out.push(id1);
+    }
+    // If we JUST reached full, send "Complete Level N Check 2"
+    if (completedCount === stagesPer){
+      const id2 = locIdByName(locName_LevelCheck2(levelName));
+      if (id2 != null) out.push(id2);
+    }
+  } else {
+    // sanity === 1: full level only
+    if (completedCount === stagesPer){
+      const id = locIdByName(locName_LevelComplete(levelName));
+      if (id != null) out.push(id);
+    }
+  }
+
+  return out;
+}
+function sendStatusUpdate(status=30){
+  WS.send([{ cmd: 'StatusUpdate', status }]);
+  hubLog(`Sent StatusUpdate ${status}`);
+}
+function sendSync(){
+  WS.send([{ cmd: 'Sync' }]);
+  hubLog('Sent Sync');
+}
+
+function maybeSendGoalIfMet(){
+  const goalMode = Number(slot_data.goal || 1);
+  const { nLevels, stagesPer } = getLevelInfo();
+  const completed = getProgress(currentSlot) || {};
+  const allLevels = Array.from({length:nLevels}, (_,i)=> `Level ${i+1}`);
+  const stagesDone = (level)=> Object.keys(completed[level] || {}).length;
+  let goalMet = false;
+  if (goalMode === 1){
+    goalMet = allLevels.every(l => stagesDone(l) >= stagesPer);
+  } else if (goalMode === 2){
+    const threshold = Math.floor(stagesPer * 0.8 + 0.5);
+    goalMet = allLevels.every(l => stagesDone(l) >= threshold);
+  } else if (goalMode === 3){
+    const fully = allLevels.filter(l => stagesDone(l) >= stagesPer).length;
+    const required = Math.floor(nLevels * 0.8 + 0.5);
+    goalMet = (fully >= required);
+  }
+  if (goalMet){
+    hubLog('Goal condition met — sending StatusUpdate & Sync');
+    sendStatusUpdate(30);
+    sendSync();
+  }
+}
+function resendAllFulfilledChecks(){
+  const { nLevels, stagesPer } = getLevelInfo();
+  const sanity = getStageSanity();
+  const prog = getProgress(currentSlot) || {};
+  const pending = [];
+
+  for (let i=1; i<=nLevels; i++){
+    const levelName = `Level ${i}`;
+    const levelStages = prog[levelName] || {};
+    const completedCount = Object.keys(levelStages).length;
+
+    if (sanity === 3){
+      // send each completed stage's location if not sent
+      for (const kStr of Object.keys(levelStages)){
+        const k0 = Number(kStr);
+        const id = locIdByName(locName_StageComplete(i, k0+1));
+        if (id != null) pending.push(id);
+      }
+    } else if (sanity === 2){
+      const firstHalf = Math.floor(stagesPer/2);
+      if (completedCount >= firstHalf){
+        const id1 = locIdByName(locName_LevelComplete(levelName));
+        if (id1 != null) pending.push(id1);
+      }
+      if (completedCount >= stagesPer){
+        const id2 = locIdByName(locName_LevelCheck2(levelName));
+        if (id2 != null) pending.push(id2);
+      }
+    } else {
+      // sanity === 1
+      if (completedCount >= stagesPer){
+        const id = locIdByName(locName_LevelComplete(levelName));
+        if (id != null) pending.push(id);
+      }
+    }
+  }
+
+  if (pending.length){
+    const unique = Array.from(new Set(pending.map(Number)));
+    sendLocationChecks(unique);
+  }
+
+  maybeSendGoalIfMet();
+}
+
+function renderMenu(){
+  const levelsEl = document.getElementById('levels');
+  levelsEl.innerHTML = '';
+
+  const { nLevels, stagesPer } = getLevelInfo();
+  const progress = getProgress(currentSlot) || {};
+
+  for (let i = 1; i <= nLevels; i++){
+    const name = `Level ${i}`;
+    const lvlDiv = document.createElement('div');
+    lvlDiv.className = 'level';
+
+    const title = document.createElement('h3');
+    title.textContent = name;
+    lvlDiv.appendChild(title);
+
+    const row = document.createElement('div');
+    row.className = 'stage-row';
+
+    for (let s = 0; s < stagesPer; s++){
+      const stageIdx1 = s + 1;
+      const btn = document.createElement('button');
+      btn.className = 'stage';
+      btn.textContent = `Stage ${stageIdx1}`;
+
+      // done state
+      const done = !!(progress[name] && progress[name][s] && Object.keys(progress[name][s]).length);
+      if (done) btn.classList.add('done');
+
+      // lock gating from LEVEL_STATUS
+      const lvlUnlocked   = isLevelUnlocked(name);
+      const stageUnlocked = isStageUnlocked(name, stageIdx1);
+
+      if (!(lvlUnlocked && stageUnlocked)) {
+        btn.setAttribute('disabled','');
+      } else {
+        btn.addEventListener('click', ()=> startStage(name, s, (slot_data.seeds||{}), i));
+      }
+
+      row.appendChild(btn);
+    }
+
+    lvlDiv.appendChild(row);
+    levelsEl.appendChild(lvlDiv);
+  }
+}
+
+function getPairsForLevel(levelIndex){ const p=3 + (Number(levelIndex||1)-1); return Math.max(3, Math.min(12, p)); }
+function startStage(levelName, stageIndex, seeds, levelIndex){
+  let seed=''; if(seeds && seeds[levelName] && Array.isArray(seeds[levelName]) && seeds[levelName][stageIndex]!=null){ seed=String(seeds[levelName][stageIndex]) }
+  if(!seed || seed===''){ seed = `${currentSlot}:${levelName}:${stageIndex}` }
+  const pairs=getPairsForLevel(levelIndex);
+  const cfg = loadConfig(); cfg.lastSeedFor = cfg.lastSeedFor||{}; cfg.lastSeedFor[`${currentSlot}|${levelName}|${stageIndex}`]=seed; saveConfig(cfg);
+  Player.start({ seed, pairs, level: levelName, stage: stageIndex, slot: currentSlot });
+}
+
+function itemFlagsColor(flags){
+  const f = Number(flags || 0);
+  if (f & 1) return currentTheme.logColors.progression;
+  if (f & 2) return currentTheme.logColors.useful;
+  if (f & 4) return currentTheme.logColors.trap;
+  return currentTheme.logColors.filler;
+}
+
+function colorSpan(text, color){ return `<span style="color:${color}">${text}</span>`; }
+
+function slotName(slotId){
+  const s = slot_map[String(slotId)] || {};
+  return s.slot_name || `Slot ${slotId}`;
+}
+
+function playerColor(slotId){
+  return (mySlotNumber != null && Number(slotId) === Number(mySlotNumber))
+    ? currentTheme.logColors.selfPlayer : currentTheme.logColors.otherPlayer;
+}
+
+function logItemSendEntry(msg){
+  // PrintJSON ItemSend: msg.item is a NetworkItem {item, location, player, flags}, msg.receiving is the receiver slot
+  const ni       = msg.item || {};
+  const itemId   = Number(ni.item ?? ni);
+  const locId    = Number(ni.location ?? msg.location);
+  const from     = Number(ni.player ?? msg.player);
+  const recv     = Number(msg.receiving ?? msg.receiver ?? msg.slot);
+  const flags    = Number(ni.flags ?? 0);
+
+  // Item belongs to the receiver's game; location belongs to the sender's game
+  const recvGame = (slot_map[String(recv)] || {}).game || '';
+  const fromGame = (slot_map[String(from)] || {}).game || '';
+  const itemName = itemNameByGame(itemId, recvGame);
+  const locName  = locationNameByGame(locId, fromGame);
+
+  const coloredFrom = colorSpan(slotName(from), playerColor(from));
+  const coloredItem = colorSpan(itemName, itemFlagsColor(flags));
+  const coloredRecv = colorSpan(slotName(recv), playerColor(recv));
+  const coloredLoc  = colorSpan(locName, currentTheme.logColors.location);
+
+  const line = `${coloredFrom} sent ${coloredItem} to ${coloredRecv} (${coloredLoc})`;
+  hubLog(line); playerLog(line);
+}
+
+// AP message handling
+WS.onMessage((msgs)=>{
+  const arr = Array.isArray(msgs)?msgs:[msgs];
+  for(const msg of arr){
+    const cmd=msg.cmd;
+    if(cmd==='Connected'){
+      isConnected=true; currentSlot = document.getElementById('slot').value.trim(); slot_data = msg.slot_data || {}; mySlotNumber = msg.slot; hubLog('Connected');
+      const info = msg.slot_info || {}; slot_map={}; Object.keys(info).forEach(k=>{ slot_map[String(k)]={ slot_name: info[k].name || 'Unknown', game: info[k].game || 'Unknown' } });
+      WS.send([{cmd:'GetDataPackage'}]); requestSavedProgress();
+      document.getElementById('loginGrid').style.display='none'; document.getElementById('menu').style.display='block';
+      document.getElementById('menuInfo').textContent = `Slot: ${currentSlot}`;
+      initLevelStatusFromSlotData(slot_data);
+      renderMenu();
+    }
+    else if(cmd==='DataPackage'){
+      const data = msg.data || {};
+      try{
+        const games = data.games || {};
+        // APFlowFree-specific forward maps (used for unlock logic & location checks)
+        const pkg = games['APFlowFree'] || {};
+        itemNameToId = pkg.item_name_to_id || {};
+        locationNameToId = pkg.location_name_to_id || {};
+        // Per-game reverse maps (used for cross-game display in PrintJSON logs)
+        allGameItems = {};
+        allGameLocations = {};
+        for (const [gameName, gPkg] of Object.entries(games)){
+          const iMap = {}; const lMap = {};
+          for (const [name, id] of Object.entries(gPkg.item_name_to_id || {}))
+            iMap[Number(id)] = name;
+          for (const [name, id] of Object.entries(gPkg.location_name_to_id || {}))
+            lMap[Number(id)] = name;
+          allGameItems[gameName] = iMap;
+          allGameLocations[gameName] = lMap;
+        }
+      }catch{ itemNameToId = {}; locationNameToId = {}; allGameItems = {}; allGameLocations = {}; }
+      buildReverseMaps();
+      if (PENDING_RECEIVED_ITEMS.length){
+        const items = PENDING_RECEIVED_ITEMS.splice(0, PENDING_RECEIVED_ITEMS.length);
+        logReceivedItems(items);
+        processUnlocksForItems(items);
+      }
+      renderMenu();
+    }
+    else if (cmd === 'ReceivedItems'){
+      const items = Array.isArray(msg.items) ? msg.items : [];
+      const pkgReady = Object.keys(idToItemName).length > 0;
+      if (!pkgReady) {
+        PENDING_RECEIVED_ITEMS.push(...items);
+      } else {
+        logReceivedItems(items);
+      }
+      processUnlocksForItems(items);
+      renderMenu();
+    }
+    else if(cmd==='Retrieved'){
+      const results = msg.keys || {}; const keyName = `FlowFree_${currentSlot}_completed_levels`;
+      if(Object.prototype.hasOwnProperty.call(results, keyName)){
+        const server = results[keyName] || {};
+        setProgress(currentSlot, server);
+        renderMenu();
+        try { Player.hydrateFromSaved && Player.hydrateFromSaved(); } catch {}
+      }
+    }
+    else if (cmd === 'PrintJSON' && msg.type === 'ItemSend'){
+      logItemSendEntry(msg);
+    }
+    else if(cmd==='ConnectionRefused'){
+      updateStatus('Connection refused: '+(msg.error||'Unknown'), true);
+    }
+  }
+});
+
+/********************************
+ * HUB UI handlers
+ ********************************/
+const addressEl=document.getElementById('address');
+const slotEl=document.getElementById('slot');
+const passEl=document.getElementById('password');
+function doConnect(){
+  const address=addressEl.value.trim()||'192.168.4.49:38281';
+  const slot=slotEl.value.trim(); const password=passEl.value;
+  if(!slot){ updateStatus('Enter a slot name', true); return }
+  saveConfig({address, slot, password}); updateStatus('Connecting…'); WS.connect(address, slot, password);
+}
+function doResync(){ requestSavedProgress(); renderMenu(); updateStatus('Resync requested'); resendAllFulfilledChecks(); }
+
+function doDisconnect(){ try{ WS.close(); }catch{} isConnected=false; document.getElementById('menu').style.display='none'; document.getElementById('loginGrid').style.display='grid'; updateStatus('Disconnected'); }
+
+document.getElementById('btnConnect').addEventListener('click', doConnect);
+document.getElementById('btnResync').addEventListener('click', doResync);
+document.getElementById('btnDisconnect').addEventListener('click', doDisconnect);
+document.getElementById('btnClear').addEventListener('click', ()=>{ localStorage.removeItem(CFG_KEY); updateStatus('Cleared saved config'); });
+document.getElementById('btnBack').addEventListener('click', ()=>{
+  if (tryoutMode){ showView('view-tryout'); renderTryoutMenu(); }
+  else { showView('view-hub'); renderMenu(); }
+});
+
+// ===== TRYOUT MODE =====
+const TRYOUT_LEVELS = 10;
+const TRYOUT_STAGES = 3;
+let tryoutProgress = {}; // { "Level N": { stageIdx: true } }
+
+function renderTryoutMenu(){
+  const el = document.getElementById('tryoutLevels');
+  el.innerHTML = '';
+  for (let i = 1; i <= TRYOUT_LEVELS; i++){
+    const name = `Level ${i}`;
+    const lvlDiv = document.createElement('div');
+    lvlDiv.className = 'level';
+    const title = document.createElement('h3');
+    title.textContent = name;
+    lvlDiv.appendChild(title);
+    const row = document.createElement('div');
+    row.className = 'stage-row';
+    for (let s = 0; s < TRYOUT_STAGES; s++){
+      const btn = document.createElement('button');
+      btn.className = 'stage';
+      btn.textContent = `Stage ${s + 1}`;
+      if (tryoutProgress[name] && tryoutProgress[name][s]) btn.classList.add('done');
+      btn.addEventListener('click', ()=> startTryoutStage(name, s, i));
+      row.appendChild(btn);
+    }
+    lvlDiv.appendChild(row);
+    el.appendChild(lvlDiv);
+  }
+}
+
+function startTryoutStage(levelName, stageIndex, levelIndex){
+  tryoutMode = true;
+  const seed = `tryout:${levelName}:${stageIndex}`;
+  const pairs = getPairsForLevel(levelIndex);
+  Player.start({ seed, pairs, level: levelName, stage: stageIndex, slot: '_tryout' });
+}
+
+document.getElementById('btnTryout').addEventListener('click', ()=>{
+  tryoutMode = true;
+  renderTryoutMenu();
+  showView('view-tryout');
+});
+document.getElementById('btnTryoutBack').addEventListener('click', ()=>{
+  tryoutMode = false;
+  showView('view-hub');
+});
+
+/********************************
+* ===== PLAYER IMPLEMENTATION =====
+********************************/
+const Player = (()=>{
+// Utilities & RNG (Used by generator)
+function mulberry32(a){return function(){let t=a+=0x6D2B79F5; t=Math.imul(t ^ t>>>15, t | 1); t^=t+Math.imul(t ^ t>>>7, t | 61); return ((t ^ t>>>14)>>>0)/4294967296}}
+function hashStringToSeed(str){ let h=2166136261>>>0; for(let i=0;i<str.length;i++){h^=str.charCodeAt(i); h=Math.imul(h,16777619)} return h>>>0 }
+function parseSeedInput(v){ if(v==null || v===''){ return {seedInt: Math.floor(Math.random()*1e9)>>>0, source:''} } const s=String(v).trim(); if(/^[-]?\d+$/.test(s)){ let n=Number(s); n=(n>>>0); return {seedInt:n, source:s} } return {seedInt: hashStringToSeed(s), source:s} }
+function choice(arr, rand){ return arr[Math.floor(rand()*arr.length)] }
+function randint(lo, hi, rand){ return lo + Math.floor(rand()*(hi-lo+1)) }
+
+let RNG = null;
+
+function getColorMapping(){ return currentTheme.colorMapping; }
+const LETTERS=("0123456789".slice(1)+"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ").split("");
+
+const T=0, L=1, R=2; function sign(x){return x===0?0:(x<0?-1:1)}
+class UnionFind{ constructor(initial){this.uf=new Map(initial?Object.entries(initial).map(([k,v])=>[k,v]):[])} find(a){ const k=Array.isArray(a)?a:[a]; const key=String(k); const parent=this.uf.get(key); if(!parent) return key; if(parent===key) return key; const root=this.find(parent.split(',').map(Number)); this.uf.set(key,root); return root } union(a,b){ const ra=this.find(a), rb=this.find(b); if(ra!==rb){ this.uf.set(ra,rb) } } }
+class Grid{ constructor(w,h){this.w=w; this.h=h; this.grid=new Map()} key(x,y){return `${x},${y}`} set(x,y,val){this.grid.set(this.key(x,y), val)} get(x,y){return this.grid.get(this.key(x,y))||' '} has(x,y){return this.grid.has(this.key(x,y))} del(x,y){this.grid.delete(this.key(x,y))} clear(){this.grid.clear()} shrink(){ const small=new Grid(Math.floor(this.w/2), Math.floor(this.h/2)); for(let y=0;y<small.h;y++){for(let x=0;x<small.w;x++){small.set(x,y,this.get(2*x+1,2*y+1))}} return small } values(){return Array.from(this.grid.values())} test_path(path,x0,y0,dx0=0,dy0=1){ for(const xy of path.xys(dx0,dy0)){ const x=xy[0], y=xy[1]; const gx=x0 - x + y, gy=y0 + x + y; if(!(0<=gx && gx<this.w && 0<=gy && gy<this.h) || this.has(gx,gy)) return false } return true } draw_path(path,x0,y0,dx0=0,dy0=1,loop=false){ const ps=path.xys(dx0,dy0).slice(); if(loop){ const last=ps[ps.length-1]; if(!(ps[0][0]===last[0] && ps[0][1]===last[1])) throw new Error("Loop not closed"); ps.push(ps[1]) } for(let i=1;i<ps.length-1;i++){ const xp=ps[i-1][0], yp=ps[i-1][1]; const x=ps[i][0], y=ps[i][1]; const xn=ps[i+1][0], yn=ps[i+1][1]; const gx=x0 - x + y, gy=y0 + x + y; const k=[xn-xp, yn-yp, sign((x-xp)*(yn-y) - (xn-x)*(y-yp))].toString(); const dict={"1,1,1":"<", "-1,-1,-1":"<", "1,1,-1":">", "-1,-1,1":">", "-1,1,1":"v", "1,-1,-1":"v", "-1,1,-1":"^", "1,-1,1":"^", "0,2,0":"\\", "0,-2,0":"\\", "2,0,0":"/", "-2,0,0":"/"}; const v=dict[k]; this.set(gx,gy,v) } } make_tubes(){ const uf=new UnionFind(); const tg=new Grid(this.w,this.h); for(let x=0;x<this.w;x++){ let d='-'; for(let y=0;y<this.h;y++){ const key=this.get(x,y)+d; const pairs={'/-': [[0,1]], '\\-': [[1,0],[0,1]], '/|': [[1,0]], ' -': [[1,0]], ' |': [[0,1]], 'v|': [[0,1]], '>|': [[1,0]], 'v-': [[0,1]], '>-': [[1,0]]}[key] || []; for(const pr of pairs){ const dx=pr[0], dy=pr[1]; uf.union([x,y],[x+dx,y+dy]) } const map={ '/-':'┐', '\\-':'┌', '/|':'└', '\\|':'┘', ' -':'-', ' |':'|' }; tg.set(x,y, map[key] || 'x'); if(['\\','/','v','^'].includes(this.get(x,y))){ d = (d==='-')?'|':'-' } }} return [tg, uf] } clear_path(loopPath, x, y){ const pg=new Grid(this.w,this.h); pg.draw_path(loopPath,x,y,0,1,true); for(const ent of pg.grid){ const k=ent[0]; const v=ent[1]; if(v==='|') this.grid.delete(k) } } }
+class Path{ constructor(steps){this.steps=steps} xys(dx=0,dy=1){ let x=0,y=0; const out=[[x,y]]; for(let i=0;i<this.steps.length;i++){ const step=this.steps[i]; x+=dx; y+=dy; out.push([x,y]); if(step===L){ const ndx=-dy, ndy=dx; dx=ndx; dy=ndy } if(step===R){ const ndx=dy, ndy=-dx; dx=ndx; dy=ndy } else if(step===T){ x+=dx; y+=dy; out.push([x,y]) } } return out } test(){ const ps=this.xys().map(p=>p.toString()); return new Set(ps).size===ps.length } test_loop(){ const ps=this.xys().map(p=>p.toString()); const set=new Set(ps); const last=ps[ps.length-1]; return (ps.length===set.size) || (ps.length===set.size+1 && ps[0]===last) } winding(){ let r=0; for(let i=0;i<this.steps.length;i++){ if(this.steps[i]===R) r++; else if(this.steps[i]===L) r--; } return r } }
+function unrotate(x,y,dx,dy){ while(!(dx===0 && dy===1)){ const nx=-y, ny=x, ndx=-dy, ndy=dx; x=nx; y=ny; dx=ndx; dy=ndy } return [x,y] }
+class Mitm{ constructor(lr_price, t_price, rand){ this.lr_price=lr_price; this.t_price=t_price; this.inv=new Map(); this.list=[]; this.rand=rand } *_good_paths(x,y,dx,dy,budget, seen){ if(!seen) seen=new Set(); if(budget>=0) yield [[],[x,y,dx,dy]]; if(budget<=0) return; const key=`${x},${y}`; seen.add(key); const x1=x+dx, y1=y+dy; if(!seen.has(`${x1},${y1}`)){ for(const ge1 of this._good_paths(x1,y1,-dy,dx,budget-this.lr_price,seen)){ const p=ge1[0], end=ge1[1]; yield [[L].concat(p), end] } for(const ge2 of this._good_paths(x1,y1,dy,-dx,budget-this.lr_price,seen)){ const p=ge2[0], end=ge2[1]; yield [[R].concat(p), end] } const k1=`${x1},${y1}`; seen.add(k1); const x2=x1+dx, y2=y1+dy; if(!seen.has(`${x2},${y2}`)){ for(const ge3 of this._good_paths(x2,y2,dx,dy,budget-this.t_price,seen)){ const p=ge3[0], end=ge3[1]; yield [[T].concat(p), end] } } seen.delete(k1) } seen.delete(key) } prepare(budget){ const dx0=0,dy0=1; for(const gp of this._good_paths(0,0,dx0,dy0,budget)){ const pathArr=gp[0], end=gp[1]; const x=end[0], y=end[1], dx=end[2], dy=end[3]; const p=new Path(pathArr); this.list.push([p,x,y,dx,dy]); const key=`${x},${y},${dx},${dy}`; if(!this.inv.has(key)) this.inv.set(key,[]); this.inv.get(key).push(p) } } _lookup(dx,dy,xn,yn,dxn,dyn){ const rt1=unrotate(xn,yn,dx,dy); const xt=rt1[0], yt=rt1[1]; const rt2=unrotate(dxn,dyn,dx,dy); const dxt=rt2[0], dyt=rt2[1]; const k=`${xt},${yt},${dxt},${dyt}`; return this.inv.get(k)||[] } rand_path(xn,yn,dxn,dyn){ for(;;){ const item=choice(this.list,this.rand); const p=item[0], x=item[1], y=item[2], dx=item[3], dy=item[4]; const ends=this._lookup(dx,dy,xn-x,yn-y,dxn,dyn); if(ends.length){ const p2=choice(ends,this.rand); const joined=new Path(p.steps.concat(p2.steps)); if(joined.test()) return joined } } } rand_path2(xn,yn,dxn,dyn){ const seen=new Set(); const path=[]; for(;;){ seen.clear(); path.length=0; let x=0,y=0,dx=0,dy=1; seen.add("0,0"); for(let i=0; i<2*(Math.abs(xn)+Math.abs(yn)); i++){ const steps=[L,R,T]; const weights=[1/this.lr_price,1/this.lr_price,2/this.t_price]; const r=this.rand(); const total=weights[0]+weights[1]+weights[2]; let acc=0, pick=T; for(let j=0;j<steps.length;j++){ acc+=weights[j]/total; if(r<=acc){ pick=steps[j]; break } } path.push(pick); x+=dx; y+=dy; if(seen.has(`${x},${y}`)) break; seen.add(`${x},${y}`); if(pick===L){ const ndx=-dy, ndy=dx; dx=ndx; dy=ndy } if(pick===R){ const ndx=dy, ndy=-dx; dx=ndx; dy=ndy } else if(pick===T){ x+=dx; y+=dy; if(seen.has(`${x},${y}`)) break; seen.add(`${x},${y}`) } if(x===xn && y===yn) return new Path(path.slice()); const ends=this._lookup(dx,dy,xn-x,yn-y,dxn,dyn); if(ends.length) return new Path(path.slice().concat(choice(ends,this.rand).steps)) } } } rand_loop(clock=0){ for(;;){ const item=choice(this.list,this.rand); const p=item[0], x=item[1], y=item[2], dx=item[3], dy=item[4]; const ends=this._lookup(dx,dy,-x,-y,0,1); if(ends.length){ const p2=choice(ends,this.rand); const joined=new Path(p.steps.concat(p2.steps)); if(clock && joined.winding() !== clock*4) { continue } if(joined.test_loop()) return joined } } }
+}
+function has_loops(grid, uf){ const groups=new Set(); for(let y=0;y<grid.h;y++){ for(let x=0;x<grid.w;x++){ groups.add(uf.find([x,y])) } } let ends=0; for(let y=0;y<grid.h;y++){ for(let x=0;x<grid.w;x++){ const v=grid.get(x,y); if('v^<>'.indexOf(v)!==-1) ends++ } } return ends !== 2*groups.size }
+function has_pair(tg, uf){ for(let y=0;y<tg.h;y++){ for(let x=0;x<tg.w;x++){ const dxdy=[[1,0],[0,1]]; for(let i=0;i<dxdy.length;i++){ const dx=dxdy[i][0], dy=dxdy[i][1]; const x1=x+dx, y1=y+dy; if(x1<tg.w && y1<tg.h){ if(tg.get(x,y)==='x' && tg.get(x1,y1)==='x' && uf.find([x,y])===uf.find([x1,y1])) return true } } } } return false }
+function has_tripple(tg, uf){ for(let y=0;y<tg.h;y++){ for(let x=0;x<tg.h;x++){ const r=uf.find([x,y]); let n=0; const deltas=[[1,0],[0,1],[-1,0],[0,-1]]; for(let i=0;i<deltas.length;i++){ const x1=x+deltas[i][0], y1=y+deltas[i][1]; if(0<=x1&&x1<tg.w && 0<=y1&&y1<tg.h && uf.find([x1,y1])===r) n++; } if(n>=3) return true } } return false }
+function generate_puzzle(opts){
+  const pairs=(opts && typeof opts.pairs!=="undefined")?opts.pairs:5;
+  const parsed=parseSeedInput(opts?opts.seed:null); const seedInt=parsed.seedInt; RNG = mulberry32(seedInt);
+  const w=pairs+2, h=pairs+2; const mitmInst = new Mitm(2,1,RNG); mitmInst.prepare(Math.min(20, Math.max(h,6)));
+  const grid_obj = (function make(w,h, mitm, min_numbers=0, max_numbers=1000){
+    const test_ready=(grid)=>{ const sg=grid.shrink(); const tmp=sg.make_tubes(); const stg=tmp[0], uf=tmp[1];
+      const numbers=stg.values().filter(v=>v==='x').length/2;
+      return (min_numbers<=numbers && numbers<=max_numbers && !has_loops(sg,uf) && !has_pair(stg,uf) && !has_tripple(stg,uf)) };
+    const grid=new Grid(2*w+1, 2*h+1);
+    for(;;){
+      grid.clear();
+      let path=mitm.rand_path2(h,h,0,-1);
+      if(!grid.test_path(path,0,0)) continue;
+      grid.draw_path(path,0,0,0,1,false); grid.set(0,0,'\\'); grid.set(0,2*h,'/');
+      let path2=mitm.rand_path2(h,h,0,-1);
+      if(!grid.test_path(path2,2*w,2*h,0,-1)) continue;
+      grid.draw_path(path2,2*w,2*h,0,-1,false); grid.set(2*w,0,'/'); grid.set(2*w,2*h,'\\');
+      if(test_ready(grid)) return grid.shrink();
+      let tmp=grid.make_tubes(); let tg=tmp[0];
+      for(let tries=0; tries<1000; tries++){
+        const x=2*randint(0,w-1, RNG), y=2*randint(0,h-1, RNG);
+        const cell=tg.get(x,y); if(cell !== '-' && cell !== '|') continue;
+        const loop=mitm.rand_loop(cell==='-'?1:-1);
+        if(grid.test_path(loop,x,y)){ grid.clear_path(loop,x,y); grid.draw_path(loop,x,y,0,1,true);
+          tmp=grid.make_tubes(); tg=tmp[0];
+          const sg=grid.shrink(); const st=sg.make_tubes(); const stg=st[0];
+          const numbers=stg.values().filter(v=>v==='x').length/2; if(numbers>max_numbers) break;
+          if(test_ready(grid)) return sg;
+        }
+      }
+    }
+  }) (w,h, mitmInst, pairs, pairs);
+
+  function color_tubes(grid){ const tmp=grid.make_tubes(); const tube_grid=tmp[0], uf=tmp[1]; const char=new Map(); const letters=LETTERS;
+    const getChar=(root)=>{ if(!char.has(root)){ char.set(root, letters[char.size]) } return char.get(root) };
+    for(let x=0;x<tube_grid.w;x++){ for(let y=0;y<tube_grid.h;y++){ if(tube_grid.get(x,y)==='x'){ const r=uf.find([x,y]); tube_grid.set(x,y, getChar(r)) } } }
+    return [tube_grid, char]
+  }
+  const cg=color_tubes(grid_obj), color_grid=cg[0];
+  const puzzle_grid=[], start_points={};
+  for(let y=0;y<color_grid.h;y++){
+    const row=[];
+    for(let x=0;x<color_grid.w;x++){
+      const go=grid_obj.get(x,y);
+      if('v^<>'.indexOf(go)!==-1){
+        const cell=color_grid.get(x,y); row.push(cell);
+        if(!start_points[cell]) start_points[cell]=[];
+        start_points[cell].push([y,x]);
+      } else row.push('.');
+    }
+    puzzle_grid.push(row)
+  }
+  const cleaned={}; for(const k in start_points){ if(Object.prototype.hasOwnProperty.call(start_points,k)) cleaned[String(k)]=start_points[k] }
+  return { grid: puzzle_grid, start_points: cleaned, rows: color_grid.h, cols: color_grid.w, grid_obj, seed: seedInt }
+}
+
+// Canvas + state
+let CELL=56; const BOARD_PAD=8;
+const canvas=document.getElementById('board'); const ctx=canvas.getContext('2d');
+const confettiCanvas=document.getElementById('confetti'); const cctx=confettiCanvas.getContext('2d');
+function syncConfettiPosition(){
+  const dpr = window.devicePixelRatio || 1;
+  confettiCanvas.style.left   = canvas.offsetLeft + 'px';
+  confettiCanvas.style.top    = canvas.offsetTop + 'px';
+  confettiCanvas.style.width  = canvas.offsetWidth + 'px';
+  confettiCanvas.style.height = canvas.offsetHeight + 'px';
+  confettiCanvas.width  = Math.round(canvas.offsetWidth * dpr);
+  confettiCanvas.height = Math.round(canvas.offsetHeight * dpr);
+  cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+let STATE={ puzzle:null, paths:{}, gridState:[], active:null, current:[], hasReachedEnd:false, meta:{slot:'',level:'',stage:0,seed:'',pairs:0} };
+function inBounds(r,c){ return !!(STATE.puzzle && r>=0 && r<STATE.puzzle.rows && c>=0 && c<STATE.puzzle.cols) }
+function safeLast(arr){ return (Array.isArray(arr) && arr.length>0) ? arr[arr.length-1] : null }
+
+function pipeOutline(){ return Math.max(4, Math.round(CELL * 0.29)); }
+function pipeWidth(){   return Math.max(3, Math.round(CELL * 0.21)); }
+
+function strokePath(path, width, style){
+  if(path.length<2) return;
+  ctx.lineWidth=width; ctx.strokeStyle=style; ctx.beginPath();
+  for(let i=1;i<path.length;i++){
+    const y1=path[i-1][0], x1=path[i-1][1], y2=path[i][0], x2=path[i][1];
+    ctx.moveTo(x1*CELL+CELL/2, y1*CELL+CELL/2); ctx.lineTo(x2*CELL+CELL/2, y2*CELL+CELL/2);
+  }
+  ctx.stroke();
+}
+
+function drawGrid(){
+  if(!STATE.puzzle) return;
+  const rows=STATE.puzzle.rows, cols=STATE.puzzle.cols;
+  const cmap = getColorMapping();
+  ctx.clearRect(-BOARD_PAD,-BOARD_PAD,canvas.width,canvas.height);
+  ctx.lineWidth=2;
+  for(let y=0;y<rows;y++){
+    for(let x=0;x<cols;x++){
+      const x1=x*CELL, y1=y*CELL;
+      ctx.strokeStyle=currentTheme.gridLine;
+      ctx.strokeRect(x1+.5,y1+.5,CELL-1,CELL-1);
+    }
+  }
+  ctx.lineCap='round';
+  const pw = pipeWidth(), po = pipeOutline();
+  // Committed paths: underlay + colored stroke
+  for(const color in STATE.paths){
+    if(!Object.prototype.hasOwnProperty.call(STATE.paths,color)) continue;
+    const path=STATE.paths[color];
+    strokePath(path, po, currentTheme.pipeShadow);
+    strokePath(path, pw, cmap[color]||'#fff');
+  }
+  // Current drawing preview
+  if(STATE.active && STATE.current.length>1){
+    strokePath(STATE.current, po, currentTheme.pipeShadow);
+    strokePath(STATE.current, pw, cmap[STATE.active]||'#fff');
+  }
+  // Endpoints
+  for(let y=0;y<rows;y++){
+    for(let x=0;x<cols;x++){
+      const cell=STATE.puzzle.grid[y][x];
+      if(cell!=='.'){
+        const color=cmap[cell]||'#ddd';
+        const x1=x*CELL, y1=y*CELL;
+        ctx.fillStyle=color; ctx.strokeStyle=currentTheme.circleStroke; ctx.lineWidth=1.5;
+        ctx.beginPath(); ctx.arc(x1+CELL/2, y1+CELL/2, CELL/2-6, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+      }
+    }
+  }
+}
+
+function resizeCanvas(rows, cols){
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = Math.round(cols * CELL + 2*BOARD_PAD);
+  const cssH = Math.round(rows * CELL + 2*BOARD_PAD);
+  canvas.style.width  = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+  canvas.width  = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, dpr*BOARD_PAD, dpr*BOARD_PAD);
+  syncConfettiPosition();
+}
+function recomputeCell(){
+  if(!STATE.puzzle) return;
+  const rows = STATE.puzzle.rows, cols = STATE.puzzle.cols;
+  const wrap = document.getElementById('canvasWrap');
+  const gameWrap = wrap.closest('.game-wrap');
+  const header = document.querySelector('header');
+  const headerH = header.offsetHeight || 0;
+  const isSmall = window.innerWidth <= 640;
+  const isMobile = window.innerWidth <= 980;
+
+  let availW, availH;
+  if (isSmall){
+    // Mobile fullscreen: header hidden, minimal padding
+    // Total horizontal: game-wrap pad (4*2) + canvas-wrap pad (4*2) = 16
+    availW = Math.max(180, window.innerWidth - 16);
+    // Vertical: toolbar ~44px, game-wrap pad (4*2), canvas-wrap pad (4*2)
+    const toolbarH = 44;
+    availH = Math.max(180, window.innerHeight - toolbarH - 16);
+  } else {
+    const parentW = gameWrap ? gameWrap.clientWidth : window.innerWidth;
+    const wrapPad = 24;
+    availW = Math.max(180, isMobile ? parentW - wrapPad : parentW - 360 - 16 - wrapPad);
+    availH = Math.max(180, window.innerHeight - headerH - 24 - 2*12);
+  }
+
+  const box = Math.max(160, Math.min(availW, availH));
+  const cellByBox = Math.floor((box - 2*BOARD_PAD) / Math.max(rows, cols));
+  CELL = Math.max(24, Math.min(96, cellByBox));
+  resizeCanvas(rows, cols);
+  drawGrid();
+}
+const ro = new ResizeObserver(()=> recomputeCell());
+ro.observe(document.getElementById('canvasWrap'));
+window.addEventListener('resize', recomputeCell);
+window.addEventListener('orientationchange', recomputeCell);
+
+// Input helpers
+function inEndpoints(color, y, x){
+  const eps=STATE.puzzle.start_points[color]||[];
+  return eps.some(p=>p[0]===y && p[1]===x);
+}
+function isValidNextCell(y,x){
+  if(!inBounds(y,x)) return false;
+  const cell=STATE.puzzle.grid[y][x];
+  if(cell!=='.' && cell!==STATE.active) return false;
+  const occ=STATE.gridState[y][x];
+  const eps=STATE.puzzle.start_points[STATE.active]||[];
+  if(occ && !eps.some(p=>p[0]===y&&p[1]===x)) return false;
+  return !(STATE.current.length >= 1 && y === STATE.current[0][0] && x === STATE.current[0][1]);
+
+}
+function getCellFromEvent(e) {
+  const rect = canvas.getBoundingClientRect();
+  const col = Math.floor((e.clientX - rect.left) / CELL);
+  const row = Math.floor((e.clientY - rect.top) / CELL);
+  return { row, col };
+}
+
+function applySavedPathsToBoard(){
+  if (!STATE.puzzle) return;
+
+  const prog = getProgress(STATE.meta.slot) || {};
+  const saved = (prog[STATE.meta.level] && prog[STATE.meta.level][STATE.meta.stage]) || null;
+
+  STATE.paths = {};
+  STATE.gridState = Array.from({length: STATE.puzzle.rows}, () => Array(STATE.puzzle.cols).fill(null));
+
+  if (!saved) { drawGrid(); return; }
+
+  const rows = STATE.puzzle.rows, cols = STATE.puzzle.cols;
+  const epsByColor = STATE.puzzle.start_points || {};
+  const inb = (y,x)=> y>=0 && y<rows && x>=0 && x<cols;
+
+  for (const color in saved){
+    if (!Object.prototype.hasOwnProperty.call(saved, color)) continue;
+    const path = saved[color];
+    if (!Array.isArray(path) || path.length < 2) continue;
+
+    // validate
+    let ok = true;
+    for (let i=0;i<path.length;i++){
+      const y = path[i][0], x = path[i][1];
+      if (!inb(y,x)) { ok=false; break; }
+      if (i>0){
+        const py = path[i-1][0], px = path[i-1][1];
+        if (Math.abs(y - py) + Math.abs(x - px) !== 1) { ok=false; break; }
+      }
+    }
+    if (!ok) continue;
+
+    STATE.paths[color] = path.slice();
+    const eps = epsByColor[color] || [];
+    const isEndpoint = (yy,xx)=> eps.some(p=> p[0]===yy && p[1]===xx);
+
+    for (const [yy,xx] of path){
+      if (!isEndpoint(yy,xx)) STATE.gridState[yy][xx] = color;
+    }
+  }
+  drawGrid();
+}
+
+// Helpers for stage navigation within the same level
+function getLevelNumber(name){
+  const m = String(name||'').match(/Level\s+(\d+)/i);
+  return m ? Number(m[1]) : 1;
+}
+function updatePrevNextButtons(){
+  const idx = STATE.meta.stage || 0;
+  const prev = document.getElementById('prevBtn');
+  const next = document.getElementById('nextBtn');
+  const mPrev = document.getElementById('mobilePrev');
+  const mNext = document.getElementById('mobileNext');
+
+  if (tryoutMode){
+    const pDis = idx <= 0;
+    const nDis = idx >= TRYOUT_STAGES - 1;
+    if (prev) prev.disabled = pDis;
+    if (next) next.disabled = nDis;
+    if (mPrev) mPrev.disabled = pDis;
+    if (mNext) mNext.disabled = nDis;
+    return;
+  }
+
+  const { stagesPer } = getLevelInfo();
+  const levelName = STATE.meta.level;
+  let hasPrev = false;
+  let hasNext = false;
+  if (idx > 0){
+      hasPrev = isStageUnlocked(levelName, idx);
+  }
+  if (idx < (stagesPer - 1)){
+      hasNext = isStageUnlocked(levelName, idx + 2);
+  }
+  if (prev) prev.disabled = !hasPrev;
+  if (next) next.disabled = !hasNext;
+  if (mPrev) mPrev.disabled = !hasPrev;
+  if (mNext) mNext.disabled = !hasNext;
+}
+function goToSiblingStage(delta){
+  const nextIdx = (STATE.meta.stage || 0) + delta;
+  const levelName = STATE.meta.level;
+  const levelNum = getLevelNumber(levelName);
+  if (tryoutMode){
+    if (nextIdx < 0 || nextIdx >= TRYOUT_STAGES) return;
+    startTryoutStage(levelName, nextIdx, levelNum);
+  } else {
+    const { stagesPer, seeds } = getLevelInfo();
+    if (nextIdx < 0 || nextIdx >= stagesPer) return;
+    startStage(levelName, nextIdx, seeds, levelNum);
+  }
+}
+
+function clearPathForColor(color){
+  if (!STATE.puzzle) return;
+  const old = STATE.paths[color] || [];
+  if (!old.length) return;
+
+  const endpoints = STATE.puzzle.start_points[color] || [];
+  const isEndpoint = (y,x)=> endpoints.some(p => p[0]===y && p[1]===x);
+
+  // Clear occupancy for all non-endpoint cells in that path
+  for (const [ry, rx] of old){
+    if (!isEndpoint(ry, rx)){
+      STATE.gridState[ry][rx] = null;
+    }
+  }
+  delete STATE.paths[color];
+}
+
+// —— Stroke state
+let ACTIVE_BASELINE = null; // Set of "y,x" for the committed path cells (for the active color)
+
+canvas.addEventListener('pointerup', function(e){ if (!e.isPrimary) return; finishStroke(); });
+canvas.addEventListener('pointercancel', function(e){ if (!e.isPrimary) return; STATE.active = null; STATE.current = []; STATE.hasReachedEnd = false; ACTIVE_BASELINE=null; });
+canvas.addEventListener('pointerdown', function(e){
+  if (!STATE.puzzle || !e.isPrimary) return;
+  e.preventDefault();
+  canvas.setPointerCapture(e.pointerId);
+  const { row, col } = getCellFromEvent(e);
+  if (!inBounds(row, col)) return;
+  const val = STATE.puzzle.grid[row][col];
+  if (val === '.') return;
+
+  // Select color and build a working path from the touched point
+  STATE.active = val;
+  STATE.hasReachedEnd = false;
+
+  clearPathForColor(STATE.active);
+
+  const old = STATE.paths[STATE.active] || [];
+  ACTIVE_BASELINE = new Set(old.map(([y,x])=>`${y},${x}`));
+
+  if (old.length){
+    // If touching somewhere on the existing path, start from that point (inclusive)
+    const idx = old.findIndex(p => p[0]===row && p[1]===col);
+    if (idx !== -1){
+      STATE.current = old.slice(0, idx+1);
+    } else {
+      // Not on existing path (just on endpoint). Start fresh from that endpoint.
+      STATE.current = [[row, col]];
+    }
+  } else {
+    STATE.current = [[row, col]];
+  }
+  drawGrid();
+}, { passive: false });
+// Process a single adjacent step; returns true if the path changed
+function tryStepTo(row, col){
+  const last = safeLast(STATE.current); if (!last) return false;
+  const ly = last[0], lx = last[1];
+  if (row === ly && col === lx) return false;
+  if (Math.abs(row - ly) + Math.abs(col - lx) !== 1) return false;
+
+  // Rewind if moving onto a cell already in current
+  let idx = -1;
+  for (let i = 0; i < STATE.current.length; i++) {
+    if (STATE.current[i][0] === row && STATE.current[i][1] === col) { idx = i; break; }
+  }
+  if (idx !== -1) {
+    for (let i = idx + 1; i < STATE.current.length; i++) {
+      const ry = STATE.current[i][0], rx = STATE.current[i][1];
+      if (!inEndpoints(STATE.active, ry, rx) && !ACTIVE_BASELINE.has(`${ry},${rx}`)) {
+        if (STATE.gridState[ry][rx] === STATE.active) STATE.gridState[ry][rx] = null;
+      }
+    }
+    STATE.current = STATE.current.slice(0, idx + 1);
+    STATE.hasReachedEnd = inEndpoints(STATE.active, row, col) && !(row===STATE.current[0][0] && col===STATE.current[0][1]);
+    return true;
+  }
+
+  if (!isValidNextCell(row, col) || STATE.hasReachedEnd) return false;
+
+  if (inEndpoints(STATE.active, row, col) && !(row === STATE.current[0][0] && col === STATE.current[0][1])) {
+    STATE.hasReachedEnd = true;
+  }
+
+  STATE.current.push([row, col]);
+  if (!inEndpoints(STATE.active, row, col)) STATE.gridState[row][col] = STATE.active;
+  return true;
+}
+
+canvas.addEventListener('pointermove', function(e){
+  if (!STATE.active || !e.isPrimary) return;
+  e.preventDefault();
+  if (!STATE.current || STATE.current.length === 0) return;
+
+  const { row, col } = getCellFromEvent(e);
+  if (!inBounds(row, col)) return;
+
+  const last = safeLast(STATE.current); if (!last) return;
+  const ly = last[0], lx = last[1];
+  if (row === ly && col === lx) return;
+
+  let changed = false;
+
+  // Adjacent — single step
+  if (Math.abs(row - ly) + Math.abs(col - lx) === 1){
+    changed = tryStepTo(row, col);
+  }
+  // Straight line — walk each intermediate cell
+  else if (row === ly || col === lx){
+    const dr = Math.sign(row - ly);
+    const dc = Math.sign(col - lx);
+    let cr = ly + dr, cc = lx + dc;
+    while (cr !== row + dr || cc !== col + dc){
+      if (!tryStepTo(cr, cc)) break;
+      changed = true;
+      cr += dr; cc += dc;
+    }
+  }
+
+  if (changed) drawGrid();
+}, { passive: false });
+function rebuildGridForColor(color){
+  const eps = STATE.puzzle.start_points[color] || [];
+  const isEndpoint = (y,x)=> eps.some(p=>p[0]===y && p[1]===x);
+  // Clear existing non-endpoint cells for this color
+  for (let y=0;y<STATE.puzzle.rows;y++){
+    for (let x=0;x<STATE.puzzle.cols;x++){
+      if (STATE.gridState[y][x] === color && !isEndpoint(y,x)) STATE.gridState[y][x] = null;
+    }
+  }
+  // Apply new path cells
+  const pth = STATE.paths[color] || [];
+  for (const [y,x] of pth){
+    if (!isEndpoint(y,x)) STATE.gridState[y][x] = color;
+  }
+}
+
+function finishStroke() {
+  if (!STATE.active || STATE.current.length < 2) {
+    STATE.active = null; STATE.current = []; STATE.hasReachedEnd = false; ACTIVE_BASELINE=null; return;
+  }
+  const endpoints = STATE.puzzle.start_points[STATE.active] || [];
+  const last = safeLast(STATE.current);
+  if (!last) { STATE.active = null; STATE.current = []; STATE.hasReachedEnd = false; ACTIVE_BASELINE=null; return; }
+
+  const ok = endpoints.some(p => p[0] === last[0] && p[1] === last[1]);
+  if (!ok) {
+    // Revert only the newly drawn tail (not the baseline)
+    for (let i = 0; i < STATE.current.length; i++) {
+      const y = STATE.current[i][0], x = STATE.current[i][1];
+      if (!inEndpoints(STATE.active, y, x) && !ACTIVE_BASELINE?.has(`${y},${x}`)) {
+        if (STATE.gridState[y][x] === STATE.active) STATE.gridState[y][x] = null;
+      }
+    }
+    STATE.current = []; ACTIVE_BASELINE=null; drawGrid(); return;
+  }
+
+  // Commit
+  STATE.paths[STATE.active] = STATE.current.slice();
+  rebuildGridForColor(STATE.active);
+  STATE.active = null; STATE.current = []; STATE.hasReachedEnd = false; ACTIVE_BASELINE=null;
+  drawGrid(); checkWin();
+}
+
+function pathHasSelfParallelSegment(path) {
+  if (!path || path.length < 2) return false;
+
+  // Map cell -> index in the path
+  const indexByCell = new Map();
+  for (let i = 0; i < path.length; i++) {
+    const [r, c] = path[i];
+    indexByCell.set(r + ',' + c, i);
+  }
+
+  for (let i = 0; i < path.length; i++) {
+    const [r, c] = path[i];
+    const neighbors = [
+      [r - 1, c],
+      [r + 1, c],
+      [r, c - 1],
+      [r, c + 1]
+    ];
+
+    for (const [nr, nc] of neighbors) {
+      const key = nr + ',' + nc;
+      if (!indexByCell.has(key)) continue;
+
+      const j = indexByCell.get(key);
+      // Adjacent along the path (i-1 or i+1) is fine
+      if (Math.abs(j - i) === 1) continue;
+
+      // Any other orth-adjacent same-color cell means the line
+      // is running alongside/parallel to itself.
+      return true;
+    }
+  }
+  return false;
+}
+
+function checkWin() {
+    const failed = [];
+    for (const color in STATE.puzzle.start_points) {
+        if (!Object.prototype.hasOwnProperty.call(STATE.puzzle.start_points, color)) continue;
+        if (!STATE.paths[color]) {
+            failed.push(color);
+            continue;
+        }
+        const endpoints = STATE.puzzle.start_points[color];
+        const path = STATE.paths[color];
+        const startOK = endpoints.some(p => p[0] === path[0][0] && p[1] === path[0][1]);
+        const last = safeLast(path);
+        const endOK = !!(last && endpoints.some(p => p[0] === last[0] && p[1] === last[1]));
+        if (!(startOK && endOK)) failed.push(color);
+    }
+    if (failed.length) {
+        return;
+    }
+
+    // All endpoints are connected; now ensure the board is fully filled.
+    for (let y = 0; y < STATE.puzzle.rows; y++) {
+        for (let x = 0; x < STATE.puzzle.cols; x++) {
+            if (STATE.puzzle.grid[y][x] === '.' && !STATE.gridState[y][x]) return;
+        }
+    }
+
+    // is strict mode enabled?
+    if (isStrictNoSelfParallel()) {
+        for (const color in STATE.paths) {
+            if (!Object.prototype.hasOwnProperty.call(STATE.paths, color)) continue;
+            const path = STATE.paths[color];
+            if (!path || path.length < 2) continue;
+            if (pathHasSelfParallelSegment(path)) {
+                playerLog(`One of the colors has a line running parallel to itself and you have strict mode enabled — not counting as complete. :)`);
+                return;
+            }
+        }
+    }
+
+    // If we got here, puzzle is truly complete
+    const banner = document.getElementById('winBanner');
+    banner.classList.add('show');
+    if (BANNER_TIMEOUT) clearTimeout(BANNER_TIMEOUT);
+    BANNER_TIMEOUT = setTimeout(()=>{ banner.classList.remove('show'); BANNER_TIMEOUT = null; }, 1500);
+    fireConfetti();
+    playerLog('Puzzle Complete');
+
+    if (tryoutMode){
+      tryoutProgress[STATE.meta.level] = tryoutProgress[STATE.meta.level] || {};
+      tryoutProgress[STATE.meta.level][STATE.meta.stage] = true;
+    } else {
+      const prog = getProgress(STATE.meta.slot) || {};
+      prog[STATE.meta.level] = prog[STATE.meta.level] || {};
+      prog[STATE.meta.level][STATE.meta.stage] = STATE.paths || {};
+      setProgress(STATE.meta.slot, prog);
+      pushSavedProgressToServer();
+
+      const toSend = locationsToSendAfterStage(STATE.meta.level, STATE.meta.stage);
+      if (toSend.length) {
+          sendLocationChecks(toSend);
+      }
+      maybeSendGoalIfMet();
+    }
+}
+
+let CONFETTI_RAF = null;
+let BANNER_TIMEOUT = null;
+
+function fireConfetti(){
+  clearConfettiCanvas();
+  syncConfettiPosition();
+  const dpr = window.devicePixelRatio || 1;
+  const W = confettiCanvas.width / dpr;
+  const H = confettiCanvas.height / dpr;
+  const cx = W / 2, cy = H * 0.4;
+  const COLORS = currentTheme.confettiColors;
+  const GRAVITY = 0.12;
+  const pieces = [];
+
+  for (let i = 0; i < 480; i++){
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 2 + Math.random() * 5;
+    const isRect = Math.random() > 0.3;
+    pieces.push({
+      x: cx + (Math.random() - 0.5) * W * 0.3,
+      y: cy + (Math.random() - 0.5) * H * 0.1,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 3 - Math.random() * 2,
+      w: isRect ? 4 + Math.random() * 6 : 0,
+      h: isRect ? 2 + Math.random() * 3 : 2 + Math.random() * 3,
+      rot: Math.random() * Math.PI * 2,
+      vr: (Math.random() - 0.5) * 0.2,
+      alpha: 1,
+      color: COLORS[Math.floor(Math.random() * COLORS.length)],
+      shape: isRect ? 'rect' : 'circle'
+    });
+  }
+
+  (function step(){
+    cctx.clearRect(0, 0, W, H);
+    let alive = false;
+
+    for (const p of pieces){
+      p.vy += GRAVITY;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.rot += p.vr;
+      // Fade out in the lower third
+      if (p.y > H * 0.65) p.alpha = Math.max(0, 1 - (p.y - H * 0.65) / (H * 0.35));
+      if (p.alpha <= 0 || p.y > H + 20) continue;
+      alive = true;
+
+      cctx.save();
+      cctx.globalAlpha = p.alpha;
+      cctx.translate(p.x, p.y);
+      cctx.rotate(p.rot);
+      cctx.fillStyle = p.color;
+      if (p.shape === 'rect'){
+        cctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      } else {
+        cctx.beginPath();
+        cctx.arc(0, 0, p.h, 0, Math.PI * 2);
+        cctx.fill();
+      }
+      cctx.restore();
+    }
+
+    if (alive){
+      CONFETTI_RAF = requestAnimationFrame(step);
+    } else {
+      CONFETTI_RAF = null;
+    }
+  })();
+}
+function clearConfettiCanvas(){
+  // stop any queued frames and wipe the overlay
+  if (CONFETTI_RAF !== null){
+    cancelAnimationFrame(CONFETTI_RAF);
+    CONFETTI_RAF = null;
+  }
+  cctx.clearRect(0,0,confettiCanvas.width, confettiCanvas.height);
+}
+
+function applyPuzzle(p){
+  clearConfettiCanvas();
+  if (BANNER_TIMEOUT){ clearTimeout(BANNER_TIMEOUT); BANNER_TIMEOUT = null; }
+  STATE.puzzle=p; STATE.paths={}; STATE.gridState=Array.from({length:p.rows},()=> Array(p.cols).fill(null));
+  document.getElementById('winBanner').classList.remove('show');
+  recomputeCell();
+  const info=document.getElementById('serverInfo');
+  info.textContent = `Slot: ${STATE.meta.slot || '—'} • ${STATE.meta.level || '—'} • Stage ${Number(STATE.meta.stage)+1} • Seed ${STATE.meta.seed}`;
+  playerLog(`Loaded puzzle ${STATE.meta.level} - Stage ${Number(STATE.meta.stage)+1}`);
+  updatePrevNextButtons();
+
+  // hydrate from server-saved progress (if any)
+  applySavedPathsToBoard();
+}
+
+  // Public API
+  function start({seed, pairs, level, stage, slot}){
+    STATE.meta.level=level||''; STATE.meta.stage=Number(stage||0); STATE.meta.slot=slot||'';
+    STATE.meta.pairs = Math.max(3, Math.min(12, Number(pairs||5))); STATE.meta.seed = seed || '';
+    const p=generate_puzzle({pairs:STATE.meta.pairs, seed}); applyPuzzle(p); showView('view-player');
+  }
+
+  // Player buttons
+  document.getElementById('resetBtn').addEventListener('click', ()=>{
+    if(!STATE.puzzle) return;
+    STATE.paths={}; STATE.gridState=Array.from({length:STATE.puzzle.rows},()=> Array(STATE.puzzle.cols).fill(null));
+    if (BANNER_TIMEOUT){ clearTimeout(BANNER_TIMEOUT); BANNER_TIMEOUT = null; }
+    drawGrid(); document.getElementById('winBanner').classList.remove('show'); playerLog('Board reset')
+  });
+  document.getElementById('exportBtn').addEventListener('click', ()=>{
+    if(!STATE.puzzle) return;
+    const payload={...STATE.puzzle, meta:STATE.meta};
+    const blob=new Blob([JSON.stringify(payload,null,2)], {type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=`flowfree_${STATE.meta.level.replace(/\s+/g,'_')}_s${STATE.meta.stage+1}_${STATE.meta.seed||STATE.puzzle.seed}.json`;
+    a.click(); playerLog('Exported puzzle JSON')
+  });
+  document.getElementById('prevBtn').addEventListener('click', ()=> goToSiblingStage(-1));
+  document.getElementById('nextBtn').addEventListener('click', ()=> goToSiblingStage(+1));
+
+  // Mobile toolbar buttons (must be inside IIFE to access goToSiblingStage, STATE, drawGrid, etc.)
+  document.getElementById('mobilePrev').addEventListener('click', ()=> goToSiblingStage(-1));
+  document.getElementById('mobileNext').addEventListener('click', ()=> goToSiblingStage(+1));
+  document.getElementById('mobileReset').addEventListener('click', ()=>{
+    if(!STATE.puzzle) return;
+    STATE.paths={}; STATE.gridState=Array.from({length:STATE.puzzle.rows},()=> Array(STATE.puzzle.cols).fill(null));
+    if (BANNER_TIMEOUT){ clearTimeout(BANNER_TIMEOUT); BANNER_TIMEOUT = null; }
+    drawGrid(); document.getElementById('winBanner').classList.remove('show'); playerLog('Board reset');
+  });
+
+  return { start, hydrateFromSaved: applySavedPathsToBoard, redraw: drawGrid };
+})();
+document.getElementById('mobileBack').addEventListener('click', ()=>{
+  if (tryoutMode){ showView('view-tryout'); renderTryoutMenu(); }
+  else { showView('view-hub'); renderMenu(); }
+});
+
+/********************************
+ * Hash deeplink: #play?seed=...&pairs=...&level=...&stage=...&slot=...
+ ********************************/
+(function boot(){
+  // Apply saved theme
+  applyTheme(localStorage.getItem(THEME_LS_KEY) || 'dark-blue');
+  const cfg=loadConfig(); if(cfg.address) addressEl.value=cfg.address; if(cfg.slot) slotEl.value=cfg.slot; if(cfg.password) passEl.value=cfg.password;
+  const h=location.hash||'';
+  if(h.startsWith('#play?')){
+    const sp=new URLSearchParams(h.slice('#play?'.length));
+    Player.start({ seed: sp.get('seed')||'', pairs: Number(sp.get('pairs')||5), level: sp.get('level')||'Level 1', stage: Number(sp.get('stage')||0), slot: sp.get('slot')||'' });
+  } else { showView('view-hub'); }
+})();
+</script>
+</body>
+</html>
