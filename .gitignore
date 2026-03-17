@@ -1,0 +1,16 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+/APFlowFree-Website.iml
+/copilot.data.migration.agent.xml
+/copilot.data.migration.ask.xml
+/copilot.data.migration.ask2agent.xml
+/copilot.data.migration.edit.xml
+/material_theme_project_new.xml
+/misc.xml
+/modules.xml
+/inspectionProfiles/profiles_settings.xml
+/dictionaries/project.xml
+/inspectionProfiles/Project_Default.xml
+/vcs.xml
+/.idea
