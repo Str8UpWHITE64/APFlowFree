@@ -90,29 +90,7 @@ class APFlowFreeWorld(World):
         create_apflowfree_regions(self.multiworld, self.player)
 
     def set_rules(self):
-
-        multiworld = self.multiworld
-        player = self.player
-
-        complete_loc = multiworld.get_location("Complete All Levels", player)
-
-        # Gate the event on all other checks
-        required = [
-            loc for loc in multiworld.worlds[player].progression_locations
-            if loc != "Complete All Levels"
-        ]
-        complete_loc.access_rule = lambda state: all(
-            state.can_reach(loc, "Location", player) for loc in required
-        )
-
-        complete_loc.place_locked_item(
-            Item("Victory", ItemClassification.progression, None, player)
-        )
-
-        multiworld.completion_condition[player] = lambda state: state.has("Victory", player)
-
-        print(
-            f"[DEBUG] Location {complete_loc.name}: event={getattr(complete_loc, 'event', False)}, address={complete_loc.address}")
+        apply_rules(self.multiworld, self.player)
 
     def fill_slot_data(self):
         import random

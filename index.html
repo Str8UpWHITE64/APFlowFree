@@ -429,7 +429,8 @@ function playerLog(msg){ const el=document.getElementById('playerLog'); const t=
 class WSManager{
   #ws=null; #url=null; #reconnect=true; #listeners=new Set();
   connect(addr, slot, password){
-    this.#url = (addr.startsWith('ws://')||addr.startsWith('wss://'))? addr : ('ws://'+addr);
+    const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    this.#url = (addr.startsWith('ws://')||addr.startsWith('wss://'))? addr : (scheme+addr);
     return new Promise((resolve)=>{
       try{ this.#ws = new WebSocket(this.#url); }catch(err){ updateStatus('Failed to open websocket: '+err.message, true); return }
       this.#ws.onopen = () => {
