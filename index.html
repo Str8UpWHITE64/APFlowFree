@@ -21,6 +21,7 @@
       --stage-unlocked-bg:#152040; --stage-unlocked-border:#3b82f6; --stage-unlocked-color:#93c5fd;
       --stage-unlocked-hover-bg:#1a2d55; --stage-unlocked-hover-border:#60a5fa; --stage-unlocked-shadow:0 0 6px rgba(59,130,246,.15);
       --stage-done-bg:#0b1f16; --stage-done-border:#166534; --stage-done-color:#bbf7d0;
+      --stage-collected-bg:#0b1f16; --stage-collected-border:#22c55e; --stage-collected-color:#bbf7d0;
       --banner-bg:rgba(16,185,129,.1); --banner-border:rgba(16,185,129,.25); --banner-color:#d1fae5;
       --pad:16px; --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom);
     }
@@ -42,6 +43,7 @@
       --stage-unlocked-bg:#0a1530; --stage-unlocked-border:#3b82f6; --stage-unlocked-color:#93c5fd;
       --stage-unlocked-hover-bg:#0f2040; --stage-unlocked-hover-border:#60a5fa; --stage-unlocked-shadow:0 0 6px rgba(59,130,246,.2);
       --stage-done-bg:#051510; --stage-done-border:#166534; --stage-done-color:#bbf7d0;
+      --stage-collected-bg:#051510; --stage-collected-border:#22c55e; --stage-collected-color:#bbf7d0;
       --banner-bg:rgba(16,185,129,.12); --banner-border:rgba(16,185,129,.3); --banner-color:#d1fae5;
     }
 
@@ -62,6 +64,7 @@
       --stage-unlocked-bg:#dbeafe; --stage-unlocked-border:#3b82f6; --stage-unlocked-color:#1d4ed8;
       --stage-unlocked-hover-bg:#bfdbfe; --stage-unlocked-hover-border:#2563eb; --stage-unlocked-shadow:0 0 6px rgba(59,130,246,.15);
       --stage-done-bg:#dcfce7; --stage-done-border:#22c55e; --stage-done-color:#166534;
+      --stage-collected-bg:#dcfce7; --stage-collected-border:#16a34a; --stage-collected-color:#166534;
       --banner-bg:rgba(16,185,129,.12); --banner-border:rgba(16,185,129,.3); --banner-color:#065f46;
     }
 
@@ -82,6 +85,7 @@
       --stage-unlocked-bg:#eff6ff; --stage-unlocked-border:#3b82f6; --stage-unlocked-color:#1d4ed8;
       --stage-unlocked-hover-bg:#dbeafe; --stage-unlocked-hover-border:#2563eb; --stage-unlocked-shadow:0 0 6px rgba(59,130,246,.12);
       --stage-done-bg:#f0fdf4; --stage-done-border:#22c55e; --stage-done-color:#166534;
+      --stage-collected-bg:#f0fdf4; --stage-collected-border:#16a34a; --stage-collected-color:#166534;
       --banner-bg:rgba(16,185,129,.1); --banner-border:rgba(16,185,129,.25); --banner-color:#065f46;
     }
 
@@ -123,9 +127,11 @@
     .stage-row{ display:flex; flex-wrap:wrap; gap:8px }
     .stage{ padding:8px 10px; border:1px solid var(--stage-locked-border); background:var(--stage-locked-bg); color:var(--stage-locked-color); border-radius:10px; cursor:default }
     .stage[disabled]{ cursor:not-allowed }
-    .stage:not([disabled]):not(.done){ border-color:var(--stage-unlocked-border); background:var(--stage-unlocked-bg); color:var(--stage-unlocked-color); cursor:pointer; box-shadow:var(--stage-unlocked-shadow) }
-    .stage:not([disabled]):not(.done):hover{ background:var(--stage-unlocked-hover-bg); border-color:var(--stage-unlocked-hover-border) }
+    .stage:not([disabled]):not(.done):not(.collected){ border-color:var(--stage-unlocked-border); background:var(--stage-unlocked-bg); color:var(--stage-unlocked-color); cursor:pointer; box-shadow:var(--stage-unlocked-shadow) }
+    .stage:not([disabled]):not(.done):not(.collected):hover{ background:var(--stage-unlocked-hover-bg); border-color:var(--stage-unlocked-hover-border) }
     .stage.done{ border-color:var(--stage-done-border); background:var(--stage-done-bg); color:var(--stage-done-color); cursor:pointer }
+    /* Auto-completed because the item there was already collected — amber + dashed to distinguish from a real solve. */
+    .stage.collected{ border:1px dashed var(--stage-collected-border); background:var(--stage-collected-bg); color:var(--stage-collected-color); cursor:pointer }
     .log{ margin-top:8px; padding:8px; height:200px; overflow:auto; background:var(--log-bg); border:1px solid var(--border-subtle); border-radius:10px; font:12px ui-monospace, SFMono-Regular, Menlo, monospace }
     .game-wrap{ display:grid; grid-template-columns: 1fr 360px; gap:16px; padding:16px }
     .canvas-wrap{
@@ -826,6 +832,7 @@ function locName_StageComplete(levelNum, stageIdx1){
 // collected the item sitting there. In both cases there's no point solving that puzzle, so we mark
 // it complete locally (no re-send — it's already checked server-side) to speed up finishing.
 let checkedLocations = new Set(); // location ids the server reports as checked for this slot
+let goalReported = false;         // true once we've sent CLIENT_GOAL this connection (avoids re-spam)
 function syncCheckedLocations(){
   if (!currentSlot || checkedLocations.size === 0) return;
   if (Object.keys(locationNameToId || {}).length === 0) return; // need the data package to map ids
@@ -858,8 +865,10 @@ function syncCheckedLocations(){
   if (changed){
     setProgress(currentSlot, prog);
     renderMenu();
-    maybeSendGoalIfMet();
   }
+  // Always re-evaluate the goal after syncing (collected stages count toward it just like solved
+  // ones). Guarded by goalReported so this can't re-spam even when called on every RoomUpdate.
+  maybeSendGoalIfMet();
 }
 
 // ----- "Completing this sends…" reward preview (free AP location scout) -----
@@ -1071,7 +1080,8 @@ function maybeSendGoalIfMet(){
     const required = Math.floor(nLevels * pct / 100 + 0.5);
     goalMet = (fully >= required);
   }
-  if (goalMet){
+  if (goalMet && !goalReported){
+    goalReported = true;
     hubLog('Goal condition met — sending StatusUpdate & Sync');
     sendStatusUpdate(30);
     sendSync();
@@ -1147,9 +1157,13 @@ function renderMenu(){
       btn.className = 'stage';
       btn.textContent = `Stage ${stageIdx1}`;
 
-      // done state
-      const done = !!(progress[name] && progress[name][s] && Object.keys(progress[name][s]).length);
-      if (done) btn.classList.add('done');
+      // done state — distinguish an actual solve from an auto-complete (item already collected)
+      const cell = progress[name] && progress[name][s];
+      const done = !!(cell && Object.keys(cell).length);
+      if (done){
+        if (cell.__collected){ btn.classList.add('collected'); btn.title = 'Auto-completed — the item here was already collected'; }
+        else btn.classList.add('done');
+      }
 
       // lock gating from LEVEL_STATUS
       const lvlUnlocked   = isLevelUnlocked(name);
@@ -1256,6 +1270,7 @@ WS.onMessage((msgs)=>{
       PENDING_TRAP_ITEMS = [];
       LOCATION_ITEMS = {};   // re-scout reward previews fresh for this connection
       checkedLocations = new Set((msg.checked_locations || []).map(Number)); // already-checked (solved or collected)
+      goalReported = false; // re-evaluate/report the goal fresh for this connection
       // DeathLink: advertise the tag now that slot_data is known (Connect is sent before slot_data).
       if (slot_data.death_link) WS.send([{ cmd: 'ConnectUpdate', tags: ['DeathLink'] }]);
       updateHelperButtons();
