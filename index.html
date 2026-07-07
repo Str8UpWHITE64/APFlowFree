@@ -107,6 +107,8 @@
     .btn.warn{ background:var(--btn-warn-bg); border-color:var(--btn-warn-border); color:var(--btn-warn-color) }
     .small{ font-size:12px; color:var(--muted) }
     .wrap{ width:100%; max-width:1100px; padding:0 var(--pad) 16px }
+    /* The player view gets more width so large boards have room for bigger cells. */
+    #view-player{ max-width:1500px }
     .panel{ background:var(--panel); border:1px solid var(--panel-border); border-radius:16px; box-shadow:var(--panel-shadow) }
     .panel .inner{ padding:16px }
     input{ background:var(--input-bg); color:var(--ink); border:1px solid var(--input-border); border-radius:10px; padding:10px 12px; outline:none }
@@ -128,9 +130,9 @@
     .game-wrap{ display:grid; grid-template-columns: 1fr 360px; gap:16px; padding:16px }
     .canvas-wrap{
       position:relative; background:var(--canvas-wrap-bg); border-radius:16px; padding:12px;
-      display:flex; align-items:center; justify-content:center;
+      display:flex; align-items:safe center; justify-content:safe center;
       justify-self:center;
-      overflow:hidden;
+      overflow:auto; max-width:100%; max-height:calc(100vh - 96px);
     }
     canvas{ background:var(--canvas-bg); border-radius:12px; display:block }
     #board{ z-index:2; touch-action:none; position:relative }
@@ -200,6 +202,21 @@
       }
       .mobile-toolbar .btn{ padding:8px 12px; font-size:12px; flex:1; text-align:center }
     }
+
+    /* Loading / "generating puzzle" overlay (big boards can take a few seconds to build) */
+    #loadingOverlay{ position:fixed; inset:0; z-index:9999; display:none; align-items:center; justify-content:center; background:rgba(8,11,20,.62); }
+    #loadingOverlay.show{ display:flex; }
+    #loadingOverlay .ld-box{ display:flex; flex-direction:column; align-items:center; gap:14px; padding:22px 30px; border-radius:14px; background:#151a2e; border:1px solid #2a3350; box-shadow:0 12px 40px rgba(0,0,0,.45); }
+    #loadingOverlay .ld-spin{ width:40px; height:40px; border:4px solid rgba(255,255,255,.18); border-top-color:#3b82f6; border-radius:50%; animation:ld-spin .8s linear infinite; }
+    #loadingOverlay .ld-txt{ color:#cbd5e1; font:500 14px/1.2 system-ui,-apple-system,sans-serif; }
+    @keyframes ld-spin{ to{ transform:rotate(360deg); } }
+
+    /* Trap notification toast */
+    #trapToast{ position:fixed; top:16px; left:50%; transform:translateX(-50%) translateY(-160%); z-index:10000;
+      max-width:90vw; padding:12px 18px; border-radius:12px; background:#3a1020; border:1px solid #7a2540;
+      color:#ffd7df; font:600 14px/1.3 system-ui,-apple-system,sans-serif; box-shadow:0 10px 30px rgba(0,0,0,.45);
+      opacity:0; transition:transform .25s ease, opacity .25s ease; pointer-events:none; text-align:center; }
+    #trapToast.show{ transform:translateX(-50%) translateY(0); opacity:1; }
   </style>
   <script>
     // Apply theme immediately to prevent flash of wrong colors
@@ -277,7 +294,9 @@
           <canvas id="board" width="600" height="600"></canvas>
           <div class="banner" id="winBanner"><div class="banner-inner">Puzzle Complete!</div></div>
           <canvas id="confetti" width="600" height="600"></canvas>
+          <div id="loadingOverlay" aria-hidden="true"><div class="ld-box"><div class="ld-spin"></div><div class="ld-txt" id="loadingText">Generating puzzle…</div></div></div>
         </div>
+        <div id="trapToast" role="status" aria-live="polite"></div>
         <div class="mobile-toolbar">
           <button class="btn" id="mobilePrev">← Prev</button>
           <button class="btn" id="mobileBack">Back</button>
@@ -310,6 +329,29 @@
               <button class="btn" id="exportBtn">Export puzzle JSON</button>
             </div>
           </div>
+          <div class="card">
+            <h3>Completing sends</h3>
+            <div class="small" id="stageReward">—</div>
+          </div>
+          <div class="card" id="helpersCard" style="display:none">
+            <h3>Helpers</h3>
+            <div class="row" style="flex-wrap:wrap; gap:8px">
+              <button class="btn" id="solvePipeBtn">Solve Random Pipe (0)</button>
+              <button class="btn" id="skipPuzzleBtn">Skip Puzzle (0)</button>
+            </div>
+          </div>
+          <div class="card" id="trapTestCard" style="display:none">
+            <h3>Trap &amp; helper test</h3>
+            <div class="small" style="margin-bottom:8px">Fire each effect on the current board.</div>
+            <div class="row" style="flex-wrap:wrap; gap:8px">
+              <button class="btn" id="trapTestScramble">Board Clear Trap</button>
+              <button class="btn" id="trapTestFog">Fog Trap</button>
+              <button class="btn" id="trapTestShuffle">Color Shuffle Trap</button>
+              <button class="btn" id="trapTestGray">Grayscale Trap</button>
+              <button class="btn" id="testSolvePipe">Solve Random Pipe</button>
+              <button class="btn" id="testSkipPuzzle">Skip Puzzle</button>
+            </div>
+          </div>
         </aside>
       </section>
     </div>
@@ -330,28 +372,32 @@
 /********************************
  * Theme system
  ********************************/
+// Pipe colors keyed by the generator's color letters ('1'-'9' then 'a'-'k'). 20 distinct,
+// mid-tone colors so boards up to 20 pairs each get a unique, visible color (the old map
+// only had 15, so 16+ pairs rendered as white). Shared across all themes.
+const PIPE_COLORS = {'1':'#ef4444','2':'#22c55e','3':'#3b82f6','4':'#eab308','5':'#f97316','6':'#a855f7','7':'#ec4899','8':'#06b6d4','9':'#d946ef','a':'#9e792e','b':'#2e9e8b','c':'#8b9e2e','d':'#ad4e1f','e':'#2e829e','f':'#d6a371','g':'#be3759','h':'#1f57ff','i':'#25d0c2','j':'#47b3ff','k':'#bd0fae'};
 const THEMES = {
   'dark-blue': {
     gridLine:'#2e3444', pipeShadow:'#111826', circleStroke:'#222733', canvasBg:'#0f1320',
-    colorMapping:{'1':'#ef4444','2':'#22c55e','3':'#3b82f6','4':'#eab308','5':'#f97316','6':'#a855f7','7':'#ec4899','8':'#06b6d4','9':'#d946ef','a':'#f0e68c','b':'#1f2937','c':'#e6e6fa','d':'#800000','e':'#ff7f50','f':'#fa8072'},
+    colorMapping:PIPE_COLORS,
     confettiColors:['#ef4444','#22c55e','#3b82f6','#eab308','#f97316','#a855f7','#ec4899','#14b8a6'],
     logColors:{ progression:'#AF99EF', useful:'#6D8BE8', trap:'#FA8072', filler:'#00EEEE', selfPlayer:'#EE00EE', otherPlayer:'#FAFAD2', location:'#00FF7F' }
   },
   'oled': {
     gridLine:'#1a1a1a', pipeShadow:'#000000', circleStroke:'#1a1a1a', canvasBg:'#000000',
-    colorMapping:{'1':'#ef4444','2':'#22c55e','3':'#3b82f6','4':'#eab308','5':'#f97316','6':'#a855f7','7':'#ec4899','8':'#06b6d4','9':'#d946ef','a':'#f0e68c','b':'#1f2937','c':'#e6e6fa','d':'#800000','e':'#ff7f50','f':'#fa8072'},
+    colorMapping:PIPE_COLORS,
     confettiColors:['#ef4444','#22c55e','#3b82f6','#eab308','#f97316','#a855f7','#ec4899','#14b8a6'],
     logColors:{ progression:'#c4b0ff', useful:'#8aa4ff', trap:'#ff9090', filler:'#33ffff', selfPlayer:'#ff33ff', otherPlayer:'#fffff0', location:'#33ff88' }
   },
   'light': {
     gridLine:'#c5c0b8', pipeShadow:'#d0ccc4', circleStroke:'#b0a898', canvasBg:'#f5f2ed',
-    colorMapping:{'1':'#ef4444','2':'#22c55e','3':'#3b82f6','4':'#eab308','5':'#f97316','6':'#a855f7','7':'#ec4899','8':'#06b6d4','9':'#d946ef','a':'#f0e68c','b':'#1f2937','c':'#e6e6fa','d':'#800000','e':'#ff7f50','f':'#fa8072'},
+    colorMapping:PIPE_COLORS,
     confettiColors:['#ef4444','#22c55e','#3b82f6','#eab308','#f97316','#a855f7','#ec4899','#14b8a6'],
     logColors:{ progression:'#7c3aed', useful:'#2563eb', trap:'#dc2626', filler:'#0891b2', selfPlayer:'#c026d3', otherPlayer:'#92400e', location:'#15803d' }
   },
   'white': {
     gridLine:'#d4d4d4', pipeShadow:'#e0e0e0', circleStroke:'#c0c0c0', canvasBg:'#ffffff',
-    colorMapping:{'1':'#ef4444','2':'#22c55e','3':'#3b82f6','4':'#eab308','5':'#f97316','6':'#a855f7','7':'#ec4899','8':'#06b6d4','9':'#d946ef','a':'#f0e68c','b':'#1f2937','c':'#e6e6fa','d':'#800000','e':'#ff7f50','f':'#fa8072'},
+    colorMapping:PIPE_COLORS,
     confettiColors:['#ef4444','#22c55e','#3b82f6','#eab308','#f97316','#a855f7','#ec4899','#14b8a6'],
     logColors:{ progression:'#7c3aed', useful:'#1d4ed8', trap:'#b91c1c', filler:'#0e7490', selfPlayer:'#a21caf', otherPlayer:'#78350f', location:'#166534' }
   }
@@ -395,8 +441,23 @@ function showView(id){
   // On mobile, hide header when playing to maximize canvas space
   const isMobile = window.innerWidth <= 640;
   document.querySelector('header').style.display = (isMobile && id === 'view-player') ? 'none' : '';
+  // Trap/helper test panel is shown only on the puzzle screen while in tryout mode.
+  const trapCard = document.getElementById('trapTestCard');
+  if (trapCard) trapCard.style.display = (id === 'view-player' && tryoutMode) ? '' : 'none';
+  if (typeof updateHelperButtons === 'function') updateHelperButtons();
   // Scroll to top so the puzzle/view is visible
   window.scrollTo(0, 0);
+}
+
+// Loading overlay shown while a (synchronous, possibly multi-second) puzzle generates.
+function showLoading(msg){
+  const o = document.getElementById('loadingOverlay'); if (!o) return;
+  if (msg){ const t = document.getElementById('loadingText'); if (t) t.textContent = msg; }
+  o.classList.add('show'); o.setAttribute('aria-hidden', 'false');
+}
+function hideLoading(){
+  const o = document.getElementById('loadingOverlay'); if (!o) return;
+  o.classList.remove('show'); o.setAttribute('aria-hidden', 'true');
 }
 
 /********************************
@@ -428,17 +489,23 @@ function playerLog(msg){ const el=document.getElementById('playerLog'); const t=
  ********************************/
 class WSManager{
   #ws=null; #url=null; #reconnect=true; #listeners=new Set();
+  #slot=''; #password='';
+  reconnecting=false; // set while a dropped socket is being re-established; the Connected handler replays checks
+  #connectPayload(){
+    return {
+      cmd:'Connect', password:this.#password, name:this.#slot,
+      version:{build:0, class:'Version', major:0, minor:5},
+      tags:'', items_handling: 0b011, uuid:'APFlowFreeWeb', game:'APFlowFree', slot_data:true
+    };
+  }
   connect(addr, slot, password){
     const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
     this.#url = (addr.startsWith('ws://')||addr.startsWith('wss://'))? addr : (scheme+addr);
+    this.#slot = slot; this.#password = password; this.reconnecting = false;
     return new Promise((resolve)=>{
       try{ this.#ws = new WebSocket(this.#url); }catch(err){ updateStatus('Failed to open websocket: '+err.message, true); return }
       this.#ws.onopen = () => {
-        this.send([{
-          cmd:'Connect', password, name:slot,
-          version:{build:0, class:'Version', major:0, minor:5},
-          tags:'', items_handling: 0b011, uuid:'APFlowFreeWeb', game:'APFlowFree', slot_data:true
-        }]);
+        this.send([this.#connectPayload()]);
         resolve();
       };
       this.#ws.onmessage = (ev)=>{ for(const cb of this.#listeners) cb(JSON.parse(ev.data)); };
@@ -449,14 +516,20 @@ class WSManager{
   #reopen(){
     if(!this.#url) return;
     try{ this.#ws = new WebSocket(this.#url); }catch(err){ updateStatus('Reconnect failed: '+err.message, true); return }
-    this.#ws.onopen = ()=>{ this._tries=0; updateStatus('Reconnected.'); try { resendAllFulfilledChecks(); } catch {} };
+    this.#ws.onopen = ()=>{
+      this._tries=0; this.reconnecting = true; updateStatus('Reconnected — re-authenticating…');
+      // The server ignores everything on an unauthenticated socket, so we MUST re-send Connect.
+      // Fulfilled checks are replayed once the server answers with Connected (see the Connected handler).
+      this.send([this.#connectPayload()]);
+    };
     this.#ws.onmessage = (ev)=>{ for(const cb of this.#listeners) cb(JSON.parse(ev.data)); };
     this.#ws.onclose = ()=>{ if(this.#reconnect){ const d=Math.min(30000,(this._tries=(this._tries||0)+1)*1000); setTimeout(()=> this.#reopen(), d); } };
     this.#ws.onerror = (e)=> console.warn('ws error', e);
   }
+  isOpen(){ return !!(this.#ws && this.#ws.readyState===WebSocket.OPEN); }
   send(payload){ if(this.#ws && this.#ws.readyState===WebSocket.OPEN){ this.#ws.send(JSON.stringify(payload)); } }
   onMessage(cb){ this.#listeners.add(cb); return ()=> this.#listeners.delete(cb); }
-  close(){ try{ this.#reconnect=false; this.#ws?.close(); }catch{} }
+  close(){ try{ this.#reconnect=false; this.reconnecting=false; this.#ws?.close(); }catch{} }
 }
 const WS = new WSManager();
 
@@ -476,6 +549,34 @@ let allGameItems = {};       // { gameName: { id: name } } — all games, for cr
 let allGameLocations = {};   // { gameName: { id: name } } — all games, for cross-game display
 let unlockItemIds = new Set(); // <- IDs for "Level N Stages" items
 let PENDING_RECEIVED_ITEMS = []; // queue when DataPackage not ready
+let SENT_LOCATION_IDS = new Set(); // location ids already sent this session, so checks are sent idempotently
+
+// ----- Item state -----
+// State is server-authoritative via AP data storage (the same Set/Get store used for progress), so
+// it is room-scoped, cross-device, and not dependent on localStorage. We persist only MONOTONIC
+// values: TRAP_HWM (how far the item stream has been processed for trap-firing) and *_USED (helpers
+// spent). "Received" counts are recomputed for free from the server's full item stream on every
+// connect, so available = received - used. Monotonic state means a reconnect can never regress it.
+let TRAP_HWM = 0;
+let consumablesLoaded = false;  // true once the server consumables state has been loaded this connect
+let consumablesKey = null;      // AP data-storage key (slot-scoped; the server is the room)
+let roomSeedName = '';          // RoomInfo.seed_name (kept for reference; not needed for the server key)
+let PENDING_TRAP_ITEMS = [];    // [{absIdx, item}] awaiting the data package / loaded state
+let SOLVE_RECEIVED = 0, SKIP_RECEIVED = 0; // recomputed from the item stream each connect
+let SOLVE_USED = 0, SKIP_USED = 0;         // monotonic; persisted server-side
+let SOLVE_CHARGES = 0, SKIP_CHARGES = 0;   // derived available = max(0, received - used)
+const TRAP_DURATIONS = { fog: 12000, shuffle: 12000, gray: 15000 };
+function recomputeCharges(){
+  SOLVE_CHARGES = Math.max(0, SOLVE_RECEIVED - SOLVE_USED);
+  SKIP_CHARGES = Math.max(0, SKIP_RECEIVED - SKIP_USED);
+}
+function persistConsumables(){
+  if (!consumablesKey) return;
+  try {
+    WS.send([{ cmd:'Set', key:consumablesKey, want_reply:false, default:{ hwm:0, solveUsed:0, skipUsed:0 },
+      operations:[{ operation:'replace', value:{ hwm: TRAP_HWM, solveUsed: SOLVE_USED, skipUsed: SKIP_USED } }] }]);
+  } catch {}
+}
 
 function buildReverseMaps(){
   // Build APFlowFree-only reverse maps + unlockItemIds
@@ -511,6 +612,8 @@ function initLevelStatusFromSlotData() {
   const n = Number(slot_data.number_of_levels || 0);
   const s = Number(slot_data.stages_per_level || 0);
 
+  const startK = Math.min(n, Math.max(1, Number(slot_data.starting_levels || 1)));
+
   LEVEL_STATUS = {};
   for (let i = 1; i <= n; i++) {
       const lvlName = `Level ${i}`;
@@ -518,10 +621,13 @@ function initLevelStatusFromSlotData() {
       for (let j = 1; j <= s; j++) stages[j] = {locked: true};
       LEVEL_STATUS[lvlName] = {locked: true, stages};
   }
-  // Unlock all of level 1 stages
-  LEVEL_STATUS["Level 1"].locked = false;
-  for (let j = 1; j <= s; j++) LEVEL_STATUS["Level 1"].stages[j].locked = false;
-
+  // Unlock the starting levels (default: just Level 1) and all of their stages.
+  for (let i = 1; i <= startK; i++) {
+    const L = LEVEL_STATUS[`Level ${i}`];
+    if (!L) continue;
+    L.locked = false;
+    for (let j = 1; j <= s; j++) L.stages[j].locked = false;
+  }
 }
 
 function processUnlocksForItems(items){
@@ -597,6 +703,102 @@ function applyUnlockFromItemName(itemName){
   return false;
 }
 
+// FNV-1a hash so the trap dedup key is scoped to this exact multiworld (slot + per-stage seeds).
+function seedHash(obj){
+  const s = JSON.stringify(obj || {});
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(36);
+}
+
+function showTrapToast(msg){
+  const el = document.getElementById('trapToast');
+  if (!el) return;
+  el.textContent = '⚠ ' + msg;
+  el.classList.add('show');
+  clearTimeout(showTrapToast._t);
+  showTrapToast._t = setTimeout(()=> el.classList.remove('show'), 3500);
+}
+function notifyTrap(msg){ playerLog('⚠ ' + msg); hubLog('⚠ ' + msg); showTrapToast(msg); }
+
+// Dispatch a trap by item name to a client-side effect. Returns true if it was a known trap.
+// Effects are purely visual/UX and never touch saved progress or sent checks.
+function applyTrapFromItemName(name){
+  if (!name || typeof name !== 'string') return false;
+  const P = (typeof Player !== 'undefined') ? Player : null;
+  if (/^Board Clear Trap$/i.test(name)){
+    const did = !!(P && P.scramble && P.scramble());
+    notifyTrap(did ? 'Board Clear Trap — your board was cleared!' : 'Board Clear Trap received.');
+    return true;
+  }
+  if (/^Fog Trap$/i.test(name)){
+    if (P && P.fog) P.fog(TRAP_DURATIONS.fog);
+    notifyTrap('Fog Trap — the grid fades for a moment.');
+    return true;
+  }
+  if (/^Color Shuffle Trap$/i.test(name)){
+    if (P && P.shuffleColors) P.shuffleColors(TRAP_DURATIONS.shuffle);
+    notifyTrap('Color Shuffle Trap — the colors are scrambled!');
+    return true;
+  }
+  if (/^Grayscale Trap$/i.test(name)){
+    if (P && P.grayscale) P.grayscale(TRAP_DURATIONS.gray);
+    notifyTrap('Grayscale Trap — color drained for 15s!');
+    return true;
+  }
+  return false;
+}
+
+// Process queued stream items: recount RECEIVED helpers (for the available balance) and fire each
+// trap exactly once (items at absIdx >= TRAP_HWM). "Received" is recomputed from the stream — reset
+// to 0 on each connect (see the Connected handler) and re-tallied here — so it's always authoritative.
+function maybeFireTraps(){
+  if (!consumablesLoaded) return;                      // server state not loaded yet
+  if (Object.keys(idToItemName).length === 0) return;  // need the data package for item names
+  if (!PENDING_TRAP_ITEMS.length) return;
+  const pending = PENDING_TRAP_ITEMS; PENDING_TRAP_ITEMS = [];
+  let maxSeen = TRAP_HWM, helpersChanged = false;
+  for (const e of pending){
+    if (e.absIdx + 1 > maxSeen) maxSeen = e.absIdx + 1;
+    const nm = idToItemName[Number(e.item.item)];
+    if (!nm) continue;
+    // Helper RECEIVED counts every received helper (used = received - available is derived).
+    if (/^Solve Random Pipe$/i.test(nm)){ SOLVE_RECEIVED++; helpersChanged = true; if (e.absIdx >= TRAP_HWM) notifyTrap('Solve Random Pipe charge received.'); continue; }
+    if (/^Skip Puzzle$/i.test(nm)){ SKIP_RECEIVED++; helpersChanged = true; if (e.absIdx >= TRAP_HWM) notifyTrap('Skip Puzzle charge received.'); continue; }
+    // Traps fire only for genuinely-new stream items.
+    if (e.absIdx >= TRAP_HWM) applyTrapFromItemName(nm);
+  }
+  const hwmAdvanced = maxSeen > TRAP_HWM;
+  if (hwmAdvanced) TRAP_HWM = maxSeen;
+  if (helpersChanged) recomputeCharges();
+  if (hwmAdvanced) persistConsumables();               // only the fired-mark changed; used is unchanged here
+  updateHelperButtons();
+}
+
+// Update the Helpers card (counts + enabled state); show it only when the player actually has helpers.
+function updateHelperButtons(){
+  const card = document.getElementById('helpersCard');
+  const sb = document.getElementById('solvePipeBtn'), kb = document.getElementById('skipPuzzleBtn');
+  if (!card || !sb || !kb) return;
+  sb.textContent = 'Solve Random Pipe (' + SOLVE_CHARGES + ')';
+  kb.textContent = 'Skip Puzzle (' + SKIP_CHARGES + ')';
+  sb.disabled = SOLVE_CHARGES <= 0;
+  kb.disabled = SKIP_CHARGES <= 0;
+  card.style.display = (!tryoutMode && (SOLVE_CHARGES > 0 || SKIP_CHARGES > 0)) ? '' : 'none';
+}
+
+// DeathLink: send a death when the player leaves a stage (Back) without having completed it.
+function maybeSendDeathLink(){
+  if (tryoutMode || !slot_data.death_link) return;
+  const meta = (typeof Player !== 'undefined' && Player.getMeta) ? Player.getMeta() : null;
+  if (!meta || !meta.level) return;
+  const prog = getProgress(currentSlot) || {};
+  const done = !!(prog[meta.level] && prog[meta.level][meta.stage]);
+  if (done) return; // left an already-completed stage — not a death
+  try { WS.send([{ cmd: 'Bounce', tags: ['DeathLink'], data: { time: Date.now()/1000, source: currentSlot, cause: currentSlot + ' abandoned a puzzle' } }]); } catch {}
+  playerLog('💀 Sent DeathLink (left a puzzle unsolved)');
+}
+
 function isLevelUnlocked(levelName) {
   return !!(LEVEL_STATUS[levelName] && LEVEL_STATUS[levelName].locked === false);
 }
@@ -617,6 +819,96 @@ function locName_LevelComplete(levelName){ return `Complete ${levelName}`; }
 function locName_LevelCheck2(levelName){ return `Complete ${levelName} Check 2`; }
 function locName_StageComplete(levelNum, stageIdx1){
   return `Level ${levelNum} Stage ${stageIdx1} Complete`;
+}
+
+// ----- Server-checked locations: mark stages done when their check has already fired -----
+// A location becomes "checked" either because we solved it OR because its receiver goaled and
+// collected the item sitting there. In both cases there's no point solving that puzzle, so we mark
+// it complete locally (no re-send — it's already checked server-side) to speed up finishing.
+let checkedLocations = new Set(); // location ids the server reports as checked for this slot
+function syncCheckedLocations(){
+  if (!currentSlot || checkedLocations.size === 0) return;
+  if (Object.keys(locationNameToId || {}).length === 0) return; // need the data package to map ids
+  const { nLevels, stagesPer } = getLevelInfo();
+  const sanity = getStageSanity();
+  const prog = getProgress(currentSlot) || {};
+  let changed = false;
+  const markStage = (levelName, s0) => {
+    prog[levelName] = prog[levelName] || {};
+    if (!prog[levelName][s0]){ prog[levelName][s0] = { __collected: true }; changed = true; }
+  };
+  const markRange = (levelName, count) => { for (let s = 0; s < count; s++) markStage(levelName, s); };
+  for (let L = 1; L <= nLevels; L++){
+    const levelName = `Level ${L}`;
+    if (sanity === 3){
+      for (let s = 1; s <= stagesPer; s++){
+        const id = locIdByName(locName_StageComplete(L, s));
+        if (id != null && checkedLocations.has(id)) markStage(levelName, s - 1);
+      }
+    } else if (sanity === 2){
+      const idFull = locIdByName(locName_LevelCheck2(levelName));
+      const idHalf = locIdByName(locName_LevelComplete(levelName));
+      if (idFull != null && checkedLocations.has(idFull)) markRange(levelName, stagesPer);
+      else if (idHalf != null && checkedLocations.has(idHalf)) markRange(levelName, Math.max(1, Math.floor(stagesPer / 2)));
+    } else {
+      const id = locIdByName(locName_LevelComplete(levelName));
+      if (id != null && checkedLocations.has(id)) markRange(levelName, stagesPer);
+    }
+  }
+  if (changed){
+    setProgress(currentSlot, prog);
+    renderMenu();
+    maybeSendGoalIfMet();
+  }
+}
+
+// ----- "Completing this sends…" reward preview (free AP location scout) -----
+let LOCATION_ITEMS = {}; // locationId -> NetworkItem {item, location, player, flags} from LocationInfo
+// Which location(s) the reward for the current stage/level is tied to, per stage_sanity.
+function locationsForStageReward(levelNum, stageIdx0){
+  const sanity = getStageSanity();
+  const out = [];
+  if (sanity === 3){
+    const id = locIdByName(locName_StageComplete(levelNum, Number(stageIdx0) + 1));
+    if (id != null) out.push(id);
+  } else if (sanity === 2){
+    const id1 = locIdByName(locName_LevelComplete(`Level ${levelNum}`));
+    const id2 = locIdByName(locName_LevelCheck2(`Level ${levelNum}`));
+    if (id1 != null) out.push(id1);
+    if (id2 != null) out.push(id2);
+  } else {
+    const id = locIdByName(locName_LevelComplete(`Level ${levelNum}`));
+    if (id != null) out.push(id);
+  }
+  return out;
+}
+// Free scout (create_as_hint:0) of the current stage's reward location(s); then render what we have.
+function scoutStageReward(levelNum, stageIdx0){
+  renderStageReward(levelNum, stageIdx0);
+  if (tryoutMode || !isConnected) return;
+  const ids = locationsForStageReward(levelNum, stageIdx0).filter(id => !(id in LOCATION_ITEMS));
+  if (ids.length) WS.send([{ cmd:'LocationScouts', locations: ids.map(Number), create_as_hint: 0 }]);
+}
+function renderStageReward(levelNum, stageIdx0){
+  const el = document.getElementById('stageReward'); if (!el) return;
+  let L = levelNum, s = stageIdx0;
+  if (L == null){
+    const meta = (typeof Player !== 'undefined' && Player.getMeta) ? Player.getMeta() : null;
+    if (meta){ const m = String(meta.level || '').match(/Level\s+(\d+)/i); L = m ? Number(m[1]) : null; s = meta.stage; }
+  }
+  if (L == null){ el.innerHTML = ''; return; }
+  if (tryoutMode){ el.innerHTML = '<span style="color:var(--muted)">Rewards show when connected.</span>'; return; }
+  const ids = locationsForStageReward(L, s);
+  if (!ids.length){ el.innerHTML = '<span style="color:var(--muted)">No check tied to this stage.</span>'; return; }
+  el.innerHTML = ids.map(id => {
+    const ni = LOCATION_ITEMS[id];
+    if (!ni) return '<span style="color:var(--muted)">Checking…</span>';
+    const recv = Number(ni.player);
+    const recvGame = (slot_map[String(recv)] || {}).game || '';
+    const name = itemNameByGame(ni.item, recvGame);
+    const who = (recv === Number(mySlotNumber)) ? 'you' : slotName(recv);
+    return colorSpan(name, itemFlagsColor(ni.flags)) + ' → ' + who;
+  }).join('<br>');
 }
 
 function titleCase(s){
@@ -656,7 +948,11 @@ function logReceivedItems(items){
 
 function updateStatus(txt, warn=false){ const el=document.getElementById('status'); el.textContent=txt; el.style.color = warn? currentTheme.logColors.trap : ''; hubLog(txt) }
 
-function requestSavedProgress(){ const keyName = `FlowFree_${currentSlot}_completed_levels`; WS.send([{cmd:'Get', keys:[keyName]}]); }
+function requestSavedProgress(){
+  const progKey = `FlowFree_${currentSlot}_completed_levels`;
+  consumablesKey = `FlowFree_${currentSlot}_consumables`;   // AP data storage; the server scopes it to this room
+  WS.send([{cmd:'Get', keys:[progKey, consumablesKey]}]);
+}
 function pushSavedProgressToServer(){
   const keyName = `FlowFree_${currentSlot}_completed_levels`;
   const progress = getProgress(currentSlot) || {};
@@ -681,10 +977,17 @@ function getStageSanity(){
 
 function sendLocationChecks(ids){
   if(!ids || !ids.length) return;
-  WS.send([{ cmd: 'LocationChecks', locations: ids.map(Number) }]);
+  // Only send ids we haven't already sent this session, and only on an authenticated/open socket.
+  // Anything not sent (e.g. while offline) is retried by resendAllFulfilledChecks on reconnect,
+  // which recomputes fulfilled checks with >= thresholds — so a missed exact-equality edge can't
+  // permanently drop a check.
+  const fresh = ids.map(Number).filter(id => Number.isFinite(id) && !SENT_LOCATION_IDS.has(id));
+  if(!fresh.length || !WS.isOpen()) return;
+  WS.send([{ cmd: 'LocationChecks', locations: fresh }]);
 
-  for (const id of ids){
-    const name = idToLocationName[Number(id)] || `Location ${id}`;
+  for (const id of fresh){
+    SENT_LOCATION_IDS.add(id);
+    const name = idToLocationName[id] || `Location ${id}`;
     hubLog(`Checked: ${name}`);
     playerLog(`Checked: ${name}`);
   }
@@ -713,20 +1016,20 @@ function locationsToSendAfterStage(levelName, stageIdx0){
     }
   } else if (sanity === 2){
     // Halves: first half threshold, then full level
-    const firstHalf = Math.floor(stagesPer / 2);
+    const firstHalf = Math.max(1, Math.floor(stagesPer / 2));
     // If we JUST reached first half, send "Complete Level N"
-    if (completedCount === firstHalf){
+    if (completedCount >= firstHalf){
       const id1 = locIdByName(locName_LevelComplete(levelName));
       if (id1 != null) out.push(id1);
     }
     // If we JUST reached full, send "Complete Level N Check 2"
-    if (completedCount === stagesPer){
+    if (completedCount >= stagesPer){
       const id2 = locIdByName(locName_LevelCheck2(levelName));
       if (id2 != null) out.push(id2);
     }
   } else {
     // sanity === 1: full level only
-    if (completedCount === stagesPer){
+    if (completedCount >= stagesPer){
       const id = locIdByName(locName_LevelComplete(levelName));
       if (id != null) out.push(id);
     }
@@ -745,6 +1048,7 @@ function sendSync(){
 
 function maybeSendGoalIfMet(){
   const goalMode = Number(slot_data.goal || 1);
+  const pct = Number(slot_data.goal_percentage || 80);
   const { nLevels, stagesPer } = getLevelInfo();
   const completed = getProgress(currentSlot) || {};
   const allLevels = Array.from({length:nLevels}, (_,i)=> `Level ${i+1}`);
@@ -753,11 +1057,18 @@ function maybeSendGoalIfMet(){
   if (goalMode === 1){
     goalMet = allLevels.every(l => stagesDone(l) >= stagesPer);
   } else if (goalMode === 2){
-    const threshold = Math.floor(stagesPer * 0.8 + 0.5);
-    goalMet = allLevels.every(l => stagesDone(l) >= threshold);
+    // "80% of stages per level" is only representable as location checks under stage_sanity 3
+    // (one check per stage); for sanity 1/2 it collapses to full completion so the client and
+    // the apworld's completion_condition agree on when the goal is met.
+    if (getStageSanity() !== 3){
+      goalMet = allLevels.every(l => stagesDone(l) >= stagesPer);
+    } else {
+      const threshold = Math.floor(stagesPer * pct / 100 + 0.5);
+      goalMet = allLevels.every(l => stagesDone(l) >= threshold);
+    }
   } else if (goalMode === 3){
     const fully = allLevels.filter(l => stagesDone(l) >= stagesPer).length;
-    const required = Math.floor(nLevels * 0.8 + 0.5);
+    const required = Math.floor(nLevels * pct / 100 + 0.5);
     goalMet = (fully >= required);
   }
   if (goalMet){
@@ -785,7 +1096,7 @@ function resendAllFulfilledChecks(){
         if (id != null) pending.push(id);
       }
     } else if (sanity === 2){
-      const firstHalf = Math.floor(stagesPer/2);
+      const firstHalf = Math.max(1, Math.floor(stagesPer/2));
       if (completedCount >= firstHalf){
         const id1 = locIdByName(locName_LevelComplete(levelName));
         if (id1 != null) pending.push(id1);
@@ -858,13 +1169,27 @@ function renderMenu(){
   }
 }
 
-function getPairsForLevel(levelIndex){ const p=3 + (Number(levelIndex||1)-1); return Math.max(3, Math.min(12, p)); }
+function getPairsForLevel(levelIndex, cfg){
+  cfg = cfg || {}; // optional override (used by Tryout mode, which has no slot_data)
+  const nLevels = Number(cfg.nLevels != null ? cfg.nLevels : (slot_data.number_of_levels || 10));
+  const minP = Math.max(2, Number(cfg.minP != null ? cfg.minP : (slot_data.min_pairs || 3)));
+  const maxP = Math.max(minP, Number(cfg.maxP != null ? cfg.maxP : (slot_data.max_pairs || 12)));
+  const curve = String(cfg.curve != null ? cfg.curve : (slot_data.difficulty_curve || 'linear'));
+  const li = Math.max(1, Number(levelIndex || 1));
+  const t = nLevels > 1 ? (li - 1) / (nLevels - 1) : 0; // 0 on the first level, 1 on the last
+  let f = t;
+  if (curve === 'gentle') f = t * t;            // stays small longer, grows near the end
+  else if (curve === 'steep') f = Math.sqrt(t); // grows fast early, then eases
+  const p = Math.round(minP + (maxP - minP) * f);
+  return Math.max(minP, Math.min(maxP, p));
+}
 function startStage(levelName, stageIndex, seeds, levelIndex){
   let seed=''; if(seeds && seeds[levelName] && Array.isArray(seeds[levelName]) && seeds[levelName][stageIndex]!=null){ seed=String(seeds[levelName][stageIndex]) }
   if(!seed || seed===''){ seed = `${currentSlot}:${levelName}:${stageIndex}` }
   const pairs=getPairsForLevel(levelIndex);
   const cfg = loadConfig(); cfg.lastSeedFor = cfg.lastSeedFor||{}; cfg.lastSeedFor[`${currentSlot}|${levelName}|${stageIndex}`]=seed; saveConfig(cfg);
   Player.start({ seed, pairs, level: levelName, stage: stageIndex, slot: currentSlot });
+  scoutStageReward(levelIndex, stageIndex);
 }
 
 function itemFlagsColor(flags){
@@ -923,7 +1248,25 @@ WS.onMessage((msgs)=>{
       document.getElementById('loginGrid').style.display='none'; document.getElementById('menu').style.display='block';
       document.getElementById('menuInfo').textContent = `Slot: ${currentSlot}`;
       initLevelStatusFromSlotData(slot_data);
+      // Item state is loaded from AP data storage (the Get is sent in requestSavedProgress above).
+      // Reset the recomputed "received" tallies and defer item processing until the Retrieved arrives,
+      // so traps fire and the balance is computed against the authoritative server state.
+      SOLVE_RECEIVED = 0; SKIP_RECEIVED = 0;
+      consumablesLoaded = false;
+      PENDING_TRAP_ITEMS = [];
+      LOCATION_ITEMS = {};   // re-scout reward previews fresh for this connection
+      checkedLocations = new Set((msg.checked_locations || []).map(Number)); // already-checked (solved or collected)
+      // DeathLink: advertise the tag now that slot_data is known (Connect is sent before slot_data).
+      if (slot_data.death_link) WS.send([{ cmd: 'ConnectUpdate', tags: ['DeathLink'] }]);
+      updateHelperButtons();
       renderMenu();
+      if (WS.reconnecting){
+        // Socket dropped and was re-authenticated: clear the sent-cache and replay every fulfilled
+        // check so nothing earned during the outage (or dropped on the dead socket) is lost.
+        WS.reconnecting = false;
+        SENT_LOCATION_IDS.clear();
+        try { resendAllFulfilledChecks(); } catch {}
+      }
     }
     else if(cmd==='DataPackage'){
       const data = msg.data || {};
@@ -952,10 +1295,13 @@ WS.onMessage((msgs)=>{
         logReceivedItems(items);
         processUnlocksForItems(items);
       }
+      maybeFireTraps(); // names are now available; fire any queued traps once
+      syncCheckedLocations(); // location ids are mappable now; mark any already-checked stages done
       renderMenu();
     }
     else if (cmd === 'ReceivedItems'){
       const items = Array.isArray(msg.items) ? msg.items : [];
+      const startIndex = Number(msg.index || 0);
       const pkgReady = Object.keys(idToItemName).length > 0;
       if (!pkgReady) {
         PENDING_RECEIVED_ITEMS.push(...items);
@@ -963,6 +1309,9 @@ WS.onMessage((msgs)=>{
         logReceivedItems(items);
       }
       processUnlocksForItems(items);
+      // Queue each item with its absolute stream position so traps fire exactly once.
+      for (let j = 0; j < items.length; j++){ PENDING_TRAP_ITEMS.push({ absIdx: startIndex + j, item: items[j] }); }
+      maybeFireTraps();
       renderMenu();
     }
     else if(cmd==='Retrieved'){
@@ -970,12 +1319,55 @@ WS.onMessage((msgs)=>{
       if(Object.prototype.hasOwnProperty.call(results, keyName)){
         const server = results[keyName] || {};
         setProgress(currentSlot, server);
+        syncCheckedLocations(); // merge any already-checked (solved-elsewhere / collected) stages
         renderMenu();
         try { Player.hydrateFromSaved && Player.hydrateFromSaved(); } catch {}
+      }
+      const cKey = consumablesKey || `FlowFree_${currentSlot}_consumables`;
+      if(Object.prototype.hasOwnProperty.call(results, cKey)){
+        const c = results[cKey] || {};
+        // All three are monotonic — take the max of in-memory and persisted so a dropped Set or a
+        // mid-flight reconnect can never regress the fired-mark or refund a spent helper.
+        TRAP_HWM   = Math.max(TRAP_HWM,   Number(c.hwm)       || 0);
+        SOLVE_USED = Math.max(SOLVE_USED, Number(c.solveUsed) || 0);
+        SKIP_USED  = Math.max(SKIP_USED,  Number(c.skipUsed)  || 0);
+        consumablesLoaded = true;
+        recomputeCharges();
+        maybeFireTraps();   // process any items that arrived before the state loaded
+        updateHelperButtons();
       }
     }
     else if (cmd === 'PrintJSON' && msg.type === 'ItemSend'){
       logItemSendEntry(msg);
+    }
+    else if (cmd === 'LocationInfo'){
+      // Free scout reply: remember the item at each scouted location, refresh the reward preview.
+      for (const ni of (msg.locations || [])) LOCATION_ITEMS[Number(ni.location)] = ni;
+      renderStageReward();
+    }
+    else if(cmd==='RoomInfo'){
+      // Arrives before Connected. Item state is keyed in AP data storage by slot (the server scopes
+      // it to this room), so seed_name isn't needed for that; kept for reference/logging.
+      roomSeedName = msg.seed_name || roomSeedName;
+    }
+    else if(cmd==='RoomUpdate'){
+      // Fires when locations get checked live — including when another player goals and collects an
+      // item that was sitting at one of our locations. Mark those stages complete so they can be skipped.
+      if (Array.isArray(msg.checked_locations) && msg.checked_locations.length){
+        for (const id of msg.checked_locations) checkedLocations.add(Number(id));
+        syncCheckedLocations();
+      }
+    }
+    else if(cmd==='Bounced'){
+      // DeathLink: someone else died -> clear our current board (no progress lost). Ignore our own.
+      const tags = msg.tags || [];
+      if (tags.includes('DeathLink')){
+        const src = (msg.data && msg.data.source) || '';
+        if (src !== currentSlot){
+          const did = (typeof Player !== 'undefined' && Player.scramble) ? Player.scramble() : false;
+          notifyTrap('💀 DeathLink' + (src ? ' from ' + src : '') + (did ? ' — board cleared!' : ' received.'));
+        }
+      }
     }
     else if(cmd==='ConnectionRefused'){
       updateStatus('Connection refused: '+(msg.error||'Unknown'), true);
@@ -995,7 +1387,7 @@ function doConnect(){
   if(!slot){ updateStatus('Enter a slot name', true); return }
   saveConfig({address, slot, password}); updateStatus('Connecting…'); WS.connect(address, slot, password);
 }
-function doResync(){ requestSavedProgress(); renderMenu(); updateStatus('Resync requested'); resendAllFulfilledChecks(); }
+function doResync(){ requestSavedProgress(); renderMenu(); updateStatus('Resync requested'); SENT_LOCATION_IDS.clear(); resendAllFulfilledChecks(); }
 
 function doDisconnect(){ try{ WS.close(); }catch{} isConnected=false; document.getElementById('menu').style.display='none'; document.getElementById('loginGrid').style.display='grid'; updateStatus('Disconnected'); }
 
@@ -1004,13 +1396,25 @@ document.getElementById('btnResync').addEventListener('click', doResync);
 document.getElementById('btnDisconnect').addEventListener('click', doDisconnect);
 document.getElementById('btnClear').addEventListener('click', ()=>{ localStorage.removeItem(CFG_KEY); updateStatus('Cleared saved config'); });
 document.getElementById('btnBack').addEventListener('click', ()=>{
+  maybeSendDeathLink();
   if (tryoutMode){ showView('view-tryout'); renderTryoutMenu(); }
   else { showView('view-hub'); renderMenu(); }
 });
+// Helper (consumable) spend buttons.
+document.getElementById('solvePipeBtn').addEventListener('click', ()=>{
+  if (SOLVE_CHARGES <= 0) return;
+  if (Player.solvePipe && Player.solvePipe()){ SOLVE_USED++; recomputeCharges(); persistConsumables(); updateHelperButtons(); playerLog('Used Solve Random Pipe'); }
+});
+document.getElementById('skipPuzzleBtn').addEventListener('click', ()=>{
+  if (SKIP_CHARGES <= 0) return;
+  if (Player.skipPuzzle && Player.skipPuzzle()){ SKIP_USED++; recomputeCharges(); persistConsumables(); updateHelperButtons(); playerLog('Used Skip Puzzle'); }
+});
 
 // ===== TRYOUT MODE =====
-const TRYOUT_LEVELS = 10;
+const TRYOUT_LEVELS = 20;
 const TRYOUT_STAGES = 3;
+const TRYOUT_MIN_PAIRS = 3;
+const TRYOUT_MAX_PAIRS = 20; // ramp up to the new maximum board size so all sizes can be tested
 let tryoutProgress = {}; // { "Level N": { stageIdx: true } }
 
 function renderTryoutMenu(){
@@ -1041,8 +1445,9 @@ function renderTryoutMenu(){
 function startTryoutStage(levelName, stageIndex, levelIndex){
   tryoutMode = true;
   const seed = `tryout:${levelName}:${stageIndex}`;
-  const pairs = getPairsForLevel(levelIndex);
+  const pairs = getPairsForLevel(levelIndex, { nLevels: TRYOUT_LEVELS, minP: TRYOUT_MIN_PAIRS, maxP: TRYOUT_MAX_PAIRS, curve: 'linear' });
   Player.start({ seed, pairs, level: levelName, stage: stageIndex, slot: '_tryout' });
+  renderStageReward(levelIndex, stageIndex);   // shows the "connect to see rewards" note in tryout
 }
 
 document.getElementById('btnTryout').addEventListener('click', ()=>{
@@ -1068,7 +1473,25 @@ function randint(lo, hi, rand){ return lo + Math.floor(rand()*(hi-lo+1)) }
 
 let RNG = null;
 
-function getColorMapping(){ return currentTheme.colorMapping; }
+// ----- Trap visual state (Color Shuffle / Grayscale / Fog) -----
+let COLOR_OVERRIDE = null, COLOR_OVERRIDE_UNTIL = 0;
+let GRAY_UNTIL = 0, FOG_UNTIL = 0, TRAP_REDRAW_TIMER = null;
+function toGray(hex){
+  if (typeof hex !== 'string' || hex[0] !== '#' || hex.length < 7) return '#888888';
+  const n = parseInt(hex.slice(1, 7), 16);
+  const r = (n>>16)&255, g = (n>>8)&255, b = n&255;
+  const y = Math.round(0.299*r + 0.587*g + 0.114*b);
+  const h = y.toString(16).padStart(2, '0');
+  return '#' + h + h + h;
+}
+function getColorMapping(){
+  const now = Date.now();
+  let map = (COLOR_OVERRIDE && now < COLOR_OVERRIDE_UNTIL) ? COLOR_OVERRIDE : currentTheme.colorMapping;
+  if (now < GRAY_UNTIL){
+    const out = {}; for (const k in map) out[k] = toGray(map[k]); return out;
+  }
+  return map;
+}
 const LETTERS=("0123456789".slice(1)+"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ").split("");
 
 const T=0, L=1, R=2; function sign(x){return x===0?0:(x<0?-1:1)}
@@ -1081,7 +1504,8 @@ class Mitm{ constructor(lr_price, t_price, rand){ this.lr_price=lr_price; this.t
 function has_loops(grid, uf){ const groups=new Set(); for(let y=0;y<grid.h;y++){ for(let x=0;x<grid.w;x++){ groups.add(uf.find([x,y])) } } let ends=0; for(let y=0;y<grid.h;y++){ for(let x=0;x<grid.w;x++){ const v=grid.get(x,y); if('v^<>'.indexOf(v)!==-1) ends++ } } return ends !== 2*groups.size }
 function has_pair(tg, uf){ for(let y=0;y<tg.h;y++){ for(let x=0;x<tg.w;x++){ const dxdy=[[1,0],[0,1]]; for(let i=0;i<dxdy.length;i++){ const dx=dxdy[i][0], dy=dxdy[i][1]; const x1=x+dx, y1=y+dy; if(x1<tg.w && y1<tg.h){ if(tg.get(x,y)==='x' && tg.get(x1,y1)==='x' && uf.find([x,y])===uf.find([x1,y1])) return true } } } } return false }
 function has_tripple(tg, uf){ for(let y=0;y<tg.h;y++){ for(let x=0;x<tg.h;x++){ const r=uf.find([x,y]); let n=0; const deltas=[[1,0],[0,1],[-1,0],[0,-1]]; for(let i=0;i<deltas.length;i++){ const x1=x+deltas[i][0], y1=y+deltas[i][1]; if(0<=x1&&x1<tg.w && 0<=y1&&y1<tg.h && uf.find([x1,y1])===r) n++; } if(n>=3) return true } } return false }
-function generate_puzzle(opts){
+function generate_puzzle(opts, _depth){
+  _depth = _depth || 0;
   const pairs=(opts && typeof opts.pairs!=="undefined")?opts.pairs:5;
   const parsed=parseSeedInput(opts?opts.seed:null); const seedInt=parsed.seedInt; RNG = mulberry32(seedInt);
   const w=pairs+2, h=pairs+2; const mitmInst = new Mitm(2,1,RNG); mitmInst.prepare(Math.min(20, Math.max(h,6)));
@@ -1090,7 +1514,9 @@ function generate_puzzle(opts){
       const numbers=stg.values().filter(v=>v==='x').length/2;
       return (min_numbers<=numbers && numbers<=max_numbers && !has_loops(sg,uf) && !has_pair(stg,uf) && !has_tripple(stg,uf)) };
     const grid=new Grid(2*w+1, 2*h+1);
+    let __outerTries=0;
     for(;;){
+      if(++__outerTries > 3000) return null; // anti-hang: give up on a pathological seed; caller falls back to a smaller board
       grid.clear();
       let path=mitm.rand_path2(h,h,0,-1);
       if(!grid.test_path(path,0,0)) continue;
@@ -1113,6 +1539,15 @@ function generate_puzzle(opts){
       }
     }
   }) (w,h, mitmInst, pairs, pairs);
+
+  // Anti-hang fallback: generation bailed for this (rare) seed. Retry deterministically with a
+  // smaller board so the same seed always degrades the same way instead of freezing the tab.
+  if(!grid_obj){
+    if(_depth < 12){
+      return generate_puzzle({ ...(opts||{}), pairs: Math.max(2, pairs-1) }, _depth + 1);
+    }
+    throw new Error('generate_puzzle: unable to build a solvable board for seed ' + (opts && opts.seed));
+  }
 
   function color_tubes(grid){ const tmp=grid.make_tubes(); const tube_grid=tmp[0], uf=tmp[1]; const char=new Map(); const letters=LETTERS;
     const getChar=(root)=>{ if(!char.has(root)){ char.set(root, letters[char.size]) } return char.get(root) };
@@ -1172,8 +1607,10 @@ function drawGrid(){
   if(!STATE.puzzle) return;
   const rows=STATE.puzzle.rows, cols=STATE.puzzle.cols;
   const cmap = getColorMapping();
+  const fog = Date.now() < FOG_UNTIL;
   ctx.clearRect(-BOARD_PAD,-BOARD_PAD,canvas.width,canvas.height);
   ctx.lineWidth=2;
+  ctx.save(); ctx.globalAlpha = fog ? 0.10 : 1;
   for(let y=0;y<rows;y++){
     for(let x=0;x<cols;x++){
       const x1=x*CELL, y1=y*CELL;
@@ -1181,6 +1618,7 @@ function drawGrid(){
       ctx.strokeRect(x1+.5,y1+.5,CELL-1,CELL-1);
     }
   }
+  ctx.restore();
   ctx.lineCap='round';
   const pw = pipeWidth(), po = pipeOutline();
   // Committed paths: underlay + colored stroke
@@ -1195,7 +1633,8 @@ function drawGrid(){
     strokePath(STATE.current, po, currentTheme.pipeShadow);
     strokePath(STATE.current, pw, cmap[STATE.active]||'#fff');
   }
-  // Endpoints
+  // Endpoints (faded during Fog so the player must work from memory; pipes stay visible)
+  ctx.save(); ctx.globalAlpha = fog ? 0.16 : 1;
   for(let y=0;y<rows;y++){
     for(let x=0;x<cols;x++){
       const cell=STATE.puzzle.grid[y][x];
@@ -1207,6 +1646,7 @@ function drawGrid(){
       }
     }
   }
+  ctx.restore();
 }
 
 function resizeCanvas(rows, cols){
@@ -1239,15 +1679,23 @@ function recomputeCell(){
     const toolbarH = 44;
     availH = Math.max(180, window.innerHeight - toolbarH - 16);
   } else {
-    const parentW = gameWrap ? gameWrap.clientWidth : window.innerWidth;
-    const wrapPad = 24;
-    availW = Math.max(180, isMobile ? parentW - wrapPad : parentW - 360 - 16 - wrapPad);
+    const wrapPad = 24; // .canvas-wrap left+right padding (12*2)
+    const gwStyle = gameWrap ? getComputedStyle(gameWrap) : null;
+    const gwPadX = gwStyle ? (parseFloat(gwStyle.paddingLeft)||0) + (parseFloat(gwStyle.paddingRight)||0) : 0;
+    const colGap = gwStyle ? (parseFloat(gwStyle.columnGap)||0) : 0;
+    const sidebarEl = gameWrap ? gameWrap.querySelector('.sidebar') : null;
+    const sideW = (!isMobile && sidebarEl) ? sidebarEl.offsetWidth + colGap : 0;
+    // Measure the real board-column width so the canvas + its wrapper padding can't overflow it.
+    const colW = (gameWrap ? gameWrap.clientWidth : window.innerWidth) - gwPadX - sideW;
+    availW = Math.max(180, colW - wrapPad - 2);
     availH = Math.max(180, window.innerHeight - headerH - 24 - 2*12);
   }
 
   const box = Math.max(160, Math.min(availW, availH));
   const cellByBox = Math.floor((box - 2*BOARD_PAD) / Math.max(rows, cols));
-  CELL = Math.max(24, Math.min(96, cellByBox));
+  // Bigger min so large boards stay readable (they scroll inside canvas-wrap if it ever overflows);
+  // bigger max so small boards fill more of the space.
+  CELL = Math.max(30, Math.min(128, cellByBox));
   resizeCanvas(rows, cols);
   drawGrid();
 }
@@ -1587,13 +2035,13 @@ function checkWin() {
         if (!(startOK && endOK)) failed.push(color);
     }
     if (failed.length) {
-        return;
+        return false;
     }
 
     // All endpoints are connected; now ensure the board is fully filled.
     for (let y = 0; y < STATE.puzzle.rows; y++) {
         for (let x = 0; x < STATE.puzzle.cols; x++) {
-            if (STATE.puzzle.grid[y][x] === '.' && !STATE.gridState[y][x]) return;
+            if (STATE.puzzle.grid[y][x] === '.' && !STATE.gridState[y][x]) return false;
         }
     }
 
@@ -1605,7 +2053,7 @@ function checkWin() {
             if (!path || path.length < 2) continue;
             if (pathHasSelfParallelSegment(path)) {
                 playerLog(`One of the colors has a line running parallel to itself and you have strict mode enabled — not counting as complete. :)`);
-                return;
+                return false;
             }
         }
     }
@@ -1634,6 +2082,7 @@ function checkWin() {
       }
       maybeSendGoalIfMet();
     }
+    return true;
 }
 
 let CONFETTI_RAF = null;
@@ -1732,8 +2181,21 @@ function applyPuzzle(p){
   // Public API
   function start({seed, pairs, level, stage, slot}){
     STATE.meta.level=level||''; STATE.meta.stage=Number(stage||0); STATE.meta.slot=slot||'';
-    STATE.meta.pairs = Math.max(3, Math.min(12, Number(pairs||5))); STATE.meta.seed = seed || '';
-    const p=generate_puzzle({pairs:STATE.meta.pairs, seed}); applyPuzzle(p); showView('view-player');
+    STATE.meta.pairs = Math.max(2, Math.min(20, Number(pairs||5))); STATE.meta.seed = seed || '';
+    showView('view-player');
+    // Small boards generate instantly — render synchronously, no spinner flash (default games top
+    // out at 12 pairs, so they're unaffected). Big boards (raised MaxPairs) can freeze for seconds,
+    // so show a spinner and defer the work a tick so it paints first. setTimeout, not rAF — rAF is
+    // paused on hidden tabs and would leave the spinner stuck if the player switched tabs mid-load.
+    if (STATE.meta.pairs >= 13 && typeof showLoading === 'function'){
+      showLoading('Generating puzzle…');
+      setTimeout(()=>{
+        try { const p=generate_puzzle({pairs:STATE.meta.pairs, seed}); applyPuzzle(p); }
+        finally { if (typeof hideLoading === 'function') hideLoading(); }
+      }, 30);
+    } else {
+      const p=generate_puzzle({pairs:STATE.meta.pairs, seed}); applyPuzzle(p);
+    }
   }
 
   // Player buttons
@@ -1755,6 +2217,15 @@ function applyPuzzle(p){
   document.getElementById('prevBtn').addEventListener('click', ()=> goToSiblingStage(-1));
   document.getElementById('nextBtn').addEventListener('click', ()=> goToSiblingStage(+1));
 
+  // Trap test buttons (tryout only) — fire each trap through the real dispatch path.
+  const wireTrap = (id, name)=>{ const b=document.getElementById(id); if(b) b.addEventListener('click', ()=> applyTrapFromItemName(name)); };
+  wireTrap('trapTestScramble', 'Board Clear Trap');
+  wireTrap('trapTestFog', 'Fog Trap');
+  wireTrap('trapTestShuffle', 'Color Shuffle Trap');
+  wireTrap('trapTestGray', 'Grayscale Trap');
+  const _tsp=document.getElementById('testSolvePipe'); if(_tsp) _tsp.addEventListener('click', ()=> solveRandomPipe());
+  const _tsk=document.getElementById('testSkipPuzzle'); if(_tsk) _tsk.addEventListener('click', ()=> skipPuzzle());
+
   // Mobile toolbar buttons (must be inside IIFE to access goToSiblingStage, STATE, drawGrid, etc.)
   document.getElementById('mobilePrev').addEventListener('click', ()=> goToSiblingStage(-1));
   document.getElementById('mobileNext').addEventListener('click', ()=> goToSiblingStage(+1));
@@ -1765,9 +2236,153 @@ function applyPuzzle(p){
     drawGrid(); document.getElementById('winBanner').classList.remove('show'); playerLog('Board reset');
   });
 
-  return { start, hydrateFromSaved: applySavedPathsToBoard, redraw: drawGrid };
+  // ----- Trap effects (invoked by the main-scope trap dispatcher) -----
+  // Board Clear: wipe only the live in-progress board (never the saved/committed progress).
+  function trapScramble(){
+    if (!STATE.puzzle) return false;
+    STATE.paths = {};
+    STATE.gridState = Array.from({length: STATE.puzzle.rows}, ()=> Array(STATE.puzzle.cols).fill(null));
+    STATE.active = null; STATE.current = []; STATE.hasReachedEnd = false; ACTIVE_BASELINE = null;
+    if (BANNER_TIMEOUT){ clearTimeout(BANNER_TIMEOUT); BANNER_TIMEOUT = null; }
+    document.getElementById('winBanner').classList.remove('show');
+    drawGrid();
+    return true;
+  }
+  // Redraw the board when the soonest still-active trap expires, then reschedule for the next one.
+  function scheduleTrapRedraw(){
+    if (TRAP_REDRAW_TIMER){ clearTimeout(TRAP_REDRAW_TIMER); TRAP_REDRAW_TIMER = null; }
+    const now = Date.now();
+    const next = Math.min(
+      COLOR_OVERRIDE_UNTIL > now ? COLOR_OVERRIDE_UNTIL : Infinity,
+      GRAY_UNTIL > now ? GRAY_UNTIL : Infinity,
+      FOG_UNTIL > now ? FOG_UNTIL : Infinity
+    );
+    if (!isFinite(next)) return;
+    TRAP_REDRAW_TIMER = setTimeout(()=>{ TRAP_REDRAW_TIMER = null; drawGrid(); scheduleTrapRedraw(); }, Math.max(16, next - Date.now()) + 20);
+  }
+  function trapFog(ms){ FOG_UNTIL = Math.max(FOG_UNTIL, Date.now() + (ms || 12000)); drawGrid(); scheduleTrapRedraw(); }
+  function trapGrayscale(ms){ GRAY_UNTIL = Math.max(GRAY_UNTIL, Date.now() + (ms || 15000)); drawGrid(); scheduleTrapRedraw(); }
+  function trapShuffleColors(ms){
+    // Permute the pipe colors (a bijection, so they stay distinct); same letter -> same new color
+    // for both endpoints and pipe, so the puzzle stays solvable, just visually disorienting.
+    const base = currentTheme.colorMapping;
+    const keys = Object.keys(base), vals = keys.map(k => base[k]);
+    for (let i = vals.length - 1; i > 0; i--){ const j = Math.floor(Math.random() * (i + 1)); const t = vals[i]; vals[i] = vals[j]; vals[j] = t; }
+    const ov = {}; keys.forEach((k, i)=> ov[k] = vals[i]);
+    COLOR_OVERRIDE = ov; COLOR_OVERRIDE_UNTIL = Math.max(COLOR_OVERRIDE_UNTIL, Date.now() + (ms || 12000));
+    drawGrid(); scheduleTrapRedraw();
+  }
+
+  // ----- Consumable helper effects (Solve Random Pipe / Skip Puzzle) -----
+  // Reconstruct the generator's own solution as a per-cell colour grid from the solved grid_obj that
+  // generate_puzzle returns. Letters are assigned in the same order as color_tubes so they match the
+  // endpoint colours in start_points. Cached on the puzzle.
+  function getSolutionGrid(){
+    if (!STATE.puzzle) return null;
+    if (STATE.puzzle._solCache) return STATE.puzzle._solCache;
+    const go = STATE.puzzle.grid_obj;
+    if (!go || typeof go.make_tubes !== 'function') return null;
+    const mt = go.make_tubes(); const tg = mt[0], uf = mt[1];
+    const char = new Map();
+    const getChar = (root)=>{ if(!char.has(root)) char.set(root, LETTERS[char.size]); return char.get(root); };
+    for (let x=0; x<tg.w; x++) for (let y=0; y<tg.h; y++) if (tg.get(x,y)==='x') getChar(uf.find([x,y]));
+    const rows = STATE.puzzle.rows, cols = STATE.puzzle.cols, sol = [];
+    for (let y=0;y<rows;y++){ const r=[]; for(let x=0;x<cols;x++){ r.push(getChar(uf.find([x,y]))); } sol.push(r); }
+    STATE.puzzle._solCache = sol;
+    return sol;
+  }
+  function isColorSolved(color){
+    const eps = STATE.puzzle.start_points[color] || [];
+    const path = STATE.paths[color];
+    if (!path || path.length < 2 || eps.length < 2) return false;
+    const startOK = eps.some(p=>p[0]===path[0][0]&&p[1]===path[0][1]);
+    const last = path[path.length-1];
+    return startOK && eps.some(p=>p[0]===last[0]&&p[1]===last[1]);
+  }
+  function buildSolutionPath(color){
+    const sol = getSolutionGrid(); if (!sol) return null;
+    const eps = STATE.puzzle.start_points[color]; if (!eps || eps.length < 2) return null;
+    const a = eps[0], b = eps[1], rows = STATE.puzzle.rows, cols = STATE.puzzle.cols;
+    let total = 0;
+    for (let y=0;y<rows;y++) for (let x=0;x<cols;x++) if (sol[y][x]===color) total++;
+    const inSet = (y,x)=> y>=0&&y<rows&&x>=0&&x<cols && sol[y][x]===color;
+    // Backtracking DFS for the Hamiltonian path over this colour's cells from a to b. Backtracking
+    // (vs a fixed-order greedy walk) avoids short-circuiting when an endpoint has two same-colour
+    // neighbours; requiring full coverage rejects any partial trace.
+    const seen = new Set(); const path = []; let result = null;
+    function dfs(y,x){
+      if (result) return;
+      path.push([y,x]); seen.add(y+','+x);
+      if (y===b[0] && x===b[1]){
+        if (path.length === total) result = path.slice();
+      } else {
+        for (const [dy,dx] of [[-1,0],[1,0],[0,-1],[0,1]]){
+          const ny=y+dy, nx=x+dx;
+          if (inSet(ny,nx) && !seen.has(ny+','+nx)){ dfs(ny,nx); if (result) break; }
+        }
+      }
+      path.pop(); seen.delete(y+','+x);
+    }
+    dfs(a[0], a[1]);
+    return result;
+  }
+  function rebuildGridStateFromPaths(){
+    STATE.gridState = Array.from({length: STATE.puzzle.rows}, ()=> Array(STATE.puzzle.cols).fill(null));
+    for (const c in STATE.paths){
+      const eps = STATE.puzzle.start_points[c] || [];
+      const isEp = (y,x)=> eps.some(p=>p[0]===y&&p[1]===x);
+      for (const [y,x] of STATE.paths[c]) if (!isEp(y,x)) STATE.gridState[y][x] = c;
+    }
+  }
+  // Solve one random unsolved pipe. Returns true if it solved one.
+  function solveRandomPipe(){
+    if (!STATE.puzzle) return false;
+    const strict = isStrictNoSelfParallel();
+    const colors = Object.keys(STATE.puzzle.start_points);
+    // Candidates: unsolved colours with a reconstructable path that's strict-valid when strict mode
+    // is on (so we never place a pipe that would later block a strict completion).
+    const cands = [];
+    for (const c of colors){
+      if (isColorSolved(c)) continue;
+      const p = buildSolutionPath(c);
+      if (!p) continue;
+      if (strict && pathHasSelfParallelSegment(p)) continue;
+      cands.push({ c, p });
+    }
+    if (!cands.length) return false;
+    const pick = cands[Math.floor(Math.random()*cands.length)], color = pick.c, path = pick.p;
+    const cells = new Set(path.map(([y,x])=>y+','+x));   // Flow cells are exclusive: drop overlapping paths
+    for (const c of colors){ if (c===color) continue; const p=STATE.paths[c]; if (p && p.some(([y,x])=>cells.has(y+','+x))) delete STATE.paths[c]; }
+    STATE.paths[color] = path;
+    rebuildGridStateFromPaths();
+    STATE.active=null; STATE.current=[]; STATE.hasReachedEnd=false; ACTIVE_BASELINE=null;
+    drawGrid(); checkWin();
+    return true;
+  }
+  // Skip the puzzle: fill the whole solution, then let the normal win path fire the check.
+  function skipPuzzle(){
+    if (!STATE.puzzle) return false;
+    if (!getSolutionGrid()) return false;
+    const colors = Object.keys(STATE.puzzle.start_points);
+    const paths = {};
+    for (const c of colors){ const p = buildSolutionPath(c); if (!p) return false; paths[c] = p; }
+    const priorPaths = STATE.paths, priorGrid = STATE.gridState;
+    STATE.paths = paths;
+    rebuildGridStateFromPaths();
+    STATE.active=null; STATE.current=[]; STATE.hasReachedEnd=false; ACTIVE_BASELINE=null;
+    // Only commit (and let the caller spend a charge) if it actually registered a win. A board whose
+    // canonical solution is self-parallel under strict mode would be rejected — revert and report false.
+    if (checkWin()){ drawGrid(); return true; }
+    STATE.paths = priorPaths; STATE.gridState = priorGrid;
+    return false;
+  }
+
+  return { start, hydrateFromSaved: applySavedPathsToBoard, redraw: drawGrid,
+           scramble: trapScramble, fog: trapFog, grayscale: trapGrayscale, shuffleColors: trapShuffleColors,
+           solvePipe: solveRandomPipe, skipPuzzle: skipPuzzle, getMeta: ()=>({ ...STATE.meta }) };
 })();
 document.getElementById('mobileBack').addEventListener('click', ()=>{
+  maybeSendDeathLink();
   if (tryoutMode){ showView('view-tryout'); renderTryoutMenu(); }
   else { showView('view-hub'); renderMenu(); }
 });

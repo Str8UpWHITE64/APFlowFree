@@ -41,8 +41,28 @@ def build_filler_items():
     }
 
 
+def build_trap_items():
+    """Traps (id band 14000+). All client-side visual/UX effects; never touch saved progress or logic."""
+    return {
+        "Board Clear Trap": (14001, ItemClassification.trap),    # clears the in-progress board
+        "Fog Trap": (14002, ItemClassification.trap),            # fades the grid + endpoints briefly
+        "Color Shuffle Trap": (14003, ItemClassification.trap),  # scrambles the pipe colors briefly
+        "Grayscale Trap": (14004, ItemClassification.trap),      # drains all color for ~15s
+    }
+
+
+def build_useful_items():
+    """Consumable helpers (id band 15000+). The player banks these and spends them via a button."""
+    return {
+        "Solve Random Pipe": (15001, ItemClassification.useful),  # solves one random unsolved pipe
+        "Skip Puzzle": (15002, ItemClassification.useful),        # instantly completes the current stage
+    }
+
+
 # Pre-build the dicts so they can be imported as module-level constants
 ITEMS = build_level_items()
 ITEMS_B = build_half_items()
 ITEMS_C = build_stage_items()
 ITEMS_FILLER = build_filler_items()
+ITEMS_TRAPS = build_trap_items()
+ITEMS_USEFUL = build_useful_items()
