@@ -1,6 +1,6 @@
-from BaseClasses import MultiWorld, Item, ItemClassification
+from BaseClasses import MultiWorld, ItemClassification
 from worlds.generic.Rules import add_item_rule
-import math
+from .Items import APFlowFreeItem
 import re
 
 
@@ -35,8 +35,9 @@ def apply_rules(multiworld: MultiWorld, player: int):
             loc_main = multiworld.get_location(f"Complete Level {L}", player)
             loc_main.access_rule = lambda state, iname=item_first: state.has(iname, player)
 
+            # Check 2 fires only once EVERY stage in the level is done, so it needs both halves.
             loc_check2 = multiworld.get_location(f"Complete Level {L} Check 2", player)
-            loc_check2.access_rule = lambda state, iname=item_second: state.has(iname, player)
+            loc_check2.access_rule = lambda state, a=item_first, b=item_second: state.has_all((a, b), player)
 
     elif stage_sanity == 3:
         # Items: "Level N Stage S" (N = 2..num_levels, S = 1..num_stages)
@@ -50,21 +51,21 @@ def apply_rules(multiworld: MultiWorld, player: int):
     # ---------------------------------------------------------------
     # 2) Victory condition — "Complete All Levels" event location
     # ---------------------------------------------------------------
-    try:
-        complete_all_loc = multiworld.get_location("Complete All Levels", player)
-    except KeyError:
-        return
+    complete_all_loc = multiworld.get_location("Complete All Levels", player)
 
     # Build the set of locations that must be reachable to win, based on the goal:
     #   goal 1 = complete everything (all stages/levels)
-    #   goal 2 = complete 80% of the stages in every level. This is only representable as
-    #            location checks under stage_sanity 3 (one location per stage); for
-    #            stage_sanity 1/2 it collapses to full completion so that the apworld's
-    #            completion_condition and the client's StatusUpdate(CLIENT_GOAL) agree.
+    #   goal 2 = complete goal_percentage% of the stages in every level. The GOAL is independent of
+    #            stage_sanity (stage_sanity only governs how stages/levels unlock), so the client
+    #            applies this threshold on every sanity. Only stage_sanity 3 has per-stage locations
+    #            to express that threshold here; for stage_sanity 1/2 we require every location
+    #            instead — a strict SUPERSET of what the client goals on. That keeps fill safe
+    #            (everything the client could need is guaranteed reachable) even though the client
+    #            may send CLIENT_GOAL before all of them are checked.
     #   goal 3 = fully complete 80% of the levels.
     # A FIXED canonical subset is chosen (first N stages / first N levels) so the access
     # rule stays monotonic, which AP's fill requires. Thresholds mirror the client's
-    # Math.floor(x*0.8 + 0.5) in maybeSendGoalIfMet so the two never disagree.
+    # Math.floor(x*pct/100 + 0.5) in goalProgress() so the two agree wherever both can express it.
     goal = world.options.goal.value
     goal_percentage = world.options.goal_percentage.value
     all_locs = [loc for loc in world.progression_locations if loc != "Complete All Levels"]
@@ -87,7 +88,7 @@ def apply_rules(multiworld: MultiWorld, player: int):
     )
 
     complete_all_loc.place_locked_item(
-        Item("Victory", ItemClassification.progression, None, player)
+        APFlowFreeItem("Victory", ItemClassification.progression, None, player)
     )
     multiworld.completion_condition[player] = lambda state: state.has("Victory", player)
 
@@ -113,6 +114,7 @@ def apply_rules(multiworld: MultiWorld, player: int):
     elif stage_sanity == 2:
         for L in range(starting_levels + 1, num_levels + 1):
             _forbid_item_at_location(f"Level {L} Stages First Half", f"Complete Level {L}")
+            _forbid_item_at_location(f"Level {L} Stages First Half", f"Complete Level {L} Check 2")
             _forbid_item_at_location(f"Level {L} Stages Second Half", f"Complete Level {L} Check 2")
 
     elif stage_sanity == 3:
