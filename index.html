@@ -123,15 +123,34 @@
     .col-3{ grid-column:span 3 } .col-4{ grid-column:span 4 } .col-6{ grid-column:span 6 } .col-12{ grid-column:span 12 }
     .levels{ display:flex; flex-direction:column; gap:16px }
     .level{ background:var(--level-bg); border:1px solid var(--border-subtle); border-radius:14px; padding:12px }
-    .level h3{ margin:0 0 10px 0; font-size:14px; color:var(--heading) }
+    .level h3{ margin:0 0 10px 0; font-size:14px; color:var(--heading); display:flex; align-items:center; justify-content:space-between; gap:8px }
+    /* Per-level goal counter (e.g. "10/19") — how many stages this level needs to satisfy the goal. */
+    .lvl-count{ font-size:11px; font-weight:600; color:var(--muted); background:var(--pill-bg); border:1px solid var(--border-subtle); border-radius:999px; padding:2px 7px; white-space:nowrap }
+    .lvl-count.met{ color:var(--stage-done-color); background:var(--stage-done-bg); border-color:var(--stage-done-border) }
+    /* Overall goal progress summary above the level grid. */
+    .goal-bar{ display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin:10px 0 12px; padding:8px 12px; border-radius:10px;
+      background:var(--card-bg); border:1px solid var(--card-border); font-size:12px; color:var(--ink) }
+    .goal-bar .goal-text{ color:var(--muted) }
+    .goal-bar .goal-count{ font-weight:700; background:var(--pill-bg); border:1px solid var(--border-subtle); border-radius:999px; padding:2px 8px }
+    .goal-bar .goal-count.met{ color:var(--stage-done-color); background:var(--stage-done-bg); border-color:var(--stage-done-border) }
+    .goal-bar .goal-met{ color:var(--stage-done-color); font-weight:700 }
     .stage-row{ display:flex; flex-wrap:wrap; gap:8px }
     .stage{ padding:8px 10px; border:1px solid var(--stage-locked-border); background:var(--stage-locked-bg); color:var(--stage-locked-color); border-radius:10px; cursor:default }
     .stage[disabled]{ cursor:not-allowed }
     .stage:not([disabled]):not(.done):not(.collected){ border-color:var(--stage-unlocked-border); background:var(--stage-unlocked-bg); color:var(--stage-unlocked-color); cursor:pointer; box-shadow:var(--stage-unlocked-shadow) }
     .stage:not([disabled]):not(.done):not(.collected):hover{ background:var(--stage-unlocked-hover-bg); border-color:var(--stage-unlocked-hover-border) }
     .stage.done{ border-color:var(--stage-done-border); background:var(--stage-done-bg); color:var(--stage-done-color); cursor:pointer }
-    /* Auto-completed because the item there was already collected — amber + dashed to distinguish from a real solve. */
+    /* Auto-completed because the item there was already collected — green + dashed to distinguish from a real solve. */
     .stage.collected{ border:1px dashed var(--stage-collected-border); background:var(--stage-collected-bg); color:var(--stage-collected-color); cursor:pointer }
+    /* Floating tooltip shown when hovering/focusing a stage button — previews the reward's item classification. */
+    .stage-tip{ position:fixed; z-index:9999; display:none; pointer-events:none; max-width:min(300px,92vw);
+      padding:8px 10px; border-radius:10px; background:var(--card-bg); border:1px solid var(--panel-border);
+      box-shadow:var(--panel-shadow); color:var(--ink); font-size:12px; line-height:1.5 }
+    .stage-tip .tip-head{ color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.05em; margin-bottom:3px }
+    .stage-tip .tip-row{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+    .stage-tip .tip-class{ font-weight:700; font-size:9px; text-transform:uppercase; letter-spacing:.04em; padding:1px 5px; border-radius:999px; border:1px solid currentColor; margin-right:5px; opacity:.9 }
+    .stage-tip .tip-arrow{ color:var(--muted) }
+    .stage-tip .tip-muted, .stage-tip .tip-locked{ color:var(--muted) }
     .log{ margin-top:8px; padding:8px; height:200px; overflow:auto; background:var(--log-bg); border:1px solid var(--border-subtle); border-radius:10px; font:12px ui-monospace, SFMono-Regular, Menlo, monospace }
     .game-wrap{ display:grid; grid-template-columns: 1fr 360px; gap:16px; padding:16px }
     .canvas-wrap{
@@ -227,7 +246,7 @@
   <script>
     // Apply theme immediately to prevent flash of wrong colors
     (function(){
-      var t = localStorage.getItem('apflowfree-theme');
+      var t = null; try { t = localStorage.getItem('apflowfree-theme'); } catch (e) {}
       if (t && t !== 'dark-blue') document.documentElement.setAttribute('data-theme', t);
     })();
   </script>
@@ -275,6 +294,7 @@
             <button class="btn" id="btnDisconnect">Disconnect</button>
           </div>
         </div>
+        <div class="goal-bar" id="goalBar"></div>
         <div class="levels" id="levels"></div>
         <div class="log" id="hubLog"></div>
       </div>
@@ -409,6 +429,10 @@ const THEMES = {
   }
 };
 const THEME_LS_KEY = 'apflowfree-theme';
+// localStorage can throw (private mode, blocked site data); it only holds conveniences, so fail quietly.
+function lsGet(k){ try{ return localStorage.getItem(k); }catch{ return null; } }
+function lsSet(k, v){ try{ localStorage.setItem(k, v); }catch{} }
+function lsRemove(k){ try{ localStorage.removeItem(k); }catch{} }
 let currentThemeKey = 'dark-blue';
 let currentTheme = THEMES['dark-blue'];
 
@@ -421,7 +445,7 @@ function applyTheme(themeKey){
   document.querySelectorAll('.theme-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.themeId === themeKey);
   });
-  localStorage.setItem(THEME_LS_KEY, themeKey);
+  lsSet(THEME_LS_KEY, themeKey);
   if (typeof Player !== 'undefined' && Player.redraw) try{ Player.redraw(); }catch(e){}
 }
 
@@ -477,8 +501,8 @@ let progressMem = {}; // { [slot]: { "Level X": { "stageIdx": {color->path} } } 
 function getProgress(slot){ return progressMem[slot] || {}; }
 function setProgress(slot, data){ progressMem[slot] = data || {}; }
 
-function saveConfig(cfg){ localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
-function loadConfig(){ try{ return JSON.parse(localStorage.getItem(CFG_KEY)||'{}') }catch{ return {} } }
+function saveConfig(cfg){ lsSet(CFG_KEY, JSON.stringify(cfg)); }
+function loadConfig(){ try{ return JSON.parse(lsGet(CFG_KEY)||'{}') }catch{ return {} } }
 
 
 function itemNameFromId(id){ return idToItemName[Number(id)] || `Item#${id}`; }
@@ -500,14 +524,29 @@ class WSManager{
   #connectPayload(){
     return {
       cmd:'Connect', password:this.#password, name:this.#slot,
-      version:{build:0, class:'Version', major:0, minor:5},
-      tags:'', items_handling: 0b011, uuid:'APFlowFreeWeb', game:'APFlowFree', slot_data:true
+      version:{build:8, class:'Version', major:0, minor:6},
+      tags:[], items_handling: 0b011, uuid:'APFlowFreeWeb', game:'APFlowFree', slot_data:true
     };
   }
+  get slot(){ return this.#slot; } // the slot we authenticated as (not whatever is in the input box now)
+  #timer=null; // pending #reopen timeout
+  // Drop the socket and any pending reopen without triggering onclose, so we never run two sockets.
+  #teardown(){
+    if (this.#timer){ clearTimeout(this.#timer); this.#timer = null; }
+    const old = this.#ws; this.#ws = null;
+    if (old){ old.onopen = old.onmessage = old.onclose = old.onerror = null; try{ old.close(); }catch{} }
+  }
+  #scheduleReopen(){
+    if (!this.#reconnect) return;
+    const d = Math.min(30000, (this._tries = (this._tries||0) + 1) * 1000);
+    this.#timer = setTimeout(()=>{ this.#timer = null; this.#reopen(); }, d);
+  }
   connect(addr, slot, password){
+    this.#teardown();
     const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
     this.#url = (addr.startsWith('ws://')||addr.startsWith('wss://'))? addr : (scheme+addr);
     this.#slot = slot; this.#password = password; this.reconnecting = false;
+    this.#reconnect = true; this._tries = 0; // re-arm auto-reconnect (close() disarms it)
     return new Promise((resolve)=>{
       try{ this.#ws = new WebSocket(this.#url); }catch(err){ updateStatus('Failed to open websocket: '+err.message, true); return }
       this.#ws.onopen = () => {
@@ -515,13 +554,14 @@ class WSManager{
         resolve();
       };
       this.#ws.onmessage = (ev)=>{ for(const cb of this.#listeners) cb(JSON.parse(ev.data)); };
-      this.#ws.onclose = ()=>{ updateStatus('Socket closed', true); if(this.#reconnect){ const d=Math.min(30000,(this._tries=(this._tries||0)+1)*1000); setTimeout(()=> this.#reopen(), d); } };
+      this.#ws.onclose = ()=>{ updateStatus('Socket closed', true); this.#scheduleReopen(); };
       this.#ws.onerror = (e)=>{ updateStatus('Socket error', true); console.warn(e); };
     });
   }
   #reopen(){
-    if(!this.#url) return;
-    try{ this.#ws = new WebSocket(this.#url); }catch(err){ updateStatus('Reconnect failed: '+err.message, true); return }
+    if(!this.#url || !this.#reconnect) return;
+    this.#teardown();
+    try{ this.#ws = new WebSocket(this.#url); }catch(err){ updateStatus('Reconnect failed: '+err.message, true); this.#scheduleReopen(); return }
     this.#ws.onopen = ()=>{
       this._tries=0; this.reconnecting = true; updateStatus('Reconnected — re-authenticating…');
       // The server ignores everything on an unauthenticated socket, so we MUST re-send Connect.
@@ -529,13 +569,13 @@ class WSManager{
       this.send([this.#connectPayload()]);
     };
     this.#ws.onmessage = (ev)=>{ for(const cb of this.#listeners) cb(JSON.parse(ev.data)); };
-    this.#ws.onclose = ()=>{ if(this.#reconnect){ const d=Math.min(30000,(this._tries=(this._tries||0)+1)*1000); setTimeout(()=> this.#reopen(), d); } };
+    this.#ws.onclose = ()=> this.#scheduleReopen();
     this.#ws.onerror = (e)=> console.warn('ws error', e);
   }
   isOpen(){ return !!(this.#ws && this.#ws.readyState===WebSocket.OPEN); }
   send(payload){ if(this.#ws && this.#ws.readyState===WebSocket.OPEN){ this.#ws.send(JSON.stringify(payload)); } }
   onMessage(cb){ this.#listeners.add(cb); return ()=> this.#listeners.delete(cb); }
-  close(){ try{ this.#reconnect=false; this.reconnecting=false; this.#ws?.close(); }catch{} }
+  close(){ this.#reconnect=false; this.reconnecting=false; this.#teardown(); }
 }
 const WS = new WSManager();
 
@@ -553,8 +593,9 @@ let idToItemName = {};       // APFlowFree-only reverse map
 let idToLocationName = {};   // APFlowFree-only reverse map
 let allGameItems = {};       // { gameName: { id: name } } — all games, for cross-game display
 let allGameLocations = {};   // { gameName: { id: name } } — all games, for cross-game display
-let unlockItemIds = new Set(); // <- IDs for "Level N Stages" items
 let PENDING_RECEIVED_ITEMS = []; // queue when DataPackage not ready
+let ITEMS_LOGGED = 0; // stream items already logged; a reconnect resends from index 0, so skip those
+let PENDING_LOG_ITEMS = []; // not-yet-logged items waiting for the DataPackage (for names)
 let SENT_LOCATION_IDS = new Set(); // location ids already sent this session, so checks are sent idempotently
 
 // ----- Item state -----
@@ -566,7 +607,6 @@ let SENT_LOCATION_IDS = new Set(); // location ids already sent this session, so
 let TRAP_HWM = 0;
 let consumablesLoaded = false;  // true once the server consumables state has been loaded this connect
 let consumablesKey = null;      // AP data-storage key (slot-scoped; the server is the room)
-let roomSeedName = '';          // RoomInfo.seed_name (kept for reference; not needed for the server key)
 let PENDING_TRAP_ITEMS = [];    // [{absIdx, item}] awaiting the data package / loaded state
 let SOLVE_RECEIVED = 0, SKIP_RECEIVED = 0; // recomputed from the item stream each connect
 let SOLVE_USED = 0, SKIP_USED = 0;         // monotonic; persisted server-side
@@ -585,15 +625,12 @@ function persistConsumables(){
 }
 
 function buildReverseMaps(){
-  // Build APFlowFree-only reverse maps + unlockItemIds
+  // Build APFlowFree-only reverse maps
   idToItemName = {};
   idToLocationName = {};
-  unlockItemIds = new Set();
   try{
     for (const [name, id] of Object.entries(itemNameToId || {})) {
-      const num = Number(id);
-      idToItemName[num] = name;
-      if (/^Level\s+\d+\s+Stages$/i.test(name)) unlockItemIds.add(num);
+      idToItemName[Number(id)] = name;
     }
     for (const [name, id] of Object.entries(locationNameToId || {})) {
       idToLocationName[Number(id)] = name;
@@ -709,14 +746,6 @@ function applyUnlockFromItemName(itemName){
   return false;
 }
 
-// FNV-1a hash so the trap dedup key is scoped to this exact multiworld (slot + per-stage seeds).
-function seedHash(obj){
-  const s = JSON.stringify(obj || {});
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
-  return (h >>> 0).toString(36);
-}
-
 function showTrapToast(msg){
   const el = document.getElementById('trapToast');
   if (!el) return;
@@ -725,7 +754,7 @@ function showTrapToast(msg){
   clearTimeout(showTrapToast._t);
   showTrapToast._t = setTimeout(()=> el.classList.remove('show'), 3500);
 }
-function notifyTrap(msg){ playerLog('⚠ ' + msg); hubLog('⚠ ' + msg); showTrapToast(msg); }
+function notifyTrap(msg){ const safe = escapeHTML(msg); playerLog('⚠ ' + safe); hubLog('⚠ ' + safe); showTrapToast(msg); }
 
 // Dispatch a trap by item name to a client-side effect. Returns true if it was a known trap.
 // Effects are purely visual/UX and never touch saved progress or sent checks.
@@ -873,6 +902,7 @@ function syncCheckedLocations(){
 
 // ----- "Completing this sends…" reward preview (free AP location scout) -----
 let LOCATION_ITEMS = {}; // locationId -> NetworkItem {item, location, player, flags} from LocationInfo
+let HINT_SCOUTED = new Set(); // location ids we've already sent a hint-scout (create_as_hint:2) for this connection
 // Which location(s) the reward for the current stage/level is tied to, per stage_sanity.
 function locationsForStageReward(levelNum, stageIdx0){
   const sanity = getStageSanity();
@@ -891,12 +921,15 @@ function locationsForStageReward(levelNum, stageIdx0){
   }
   return out;
 }
-// Free scout (create_as_hint:0) of the current stage's reward location(s); then render what we have.
+// Scout the current stage's reward location(s) to show what completing it sends, and simultaneously
+// create a hint for it (create_as_hint:2) so the item's receiver learns their item lives here. Free
+// hints (no point cost), and only_new=True server-side means each location is broadcast at most once
+// no matter how many times the player re-opens it. Then render what we already have cached.
 function scoutStageReward(levelNum, stageIdx0){
   renderStageReward(levelNum, stageIdx0);
   if (tryoutMode || !isConnected) return;
   const ids = locationsForStageReward(levelNum, stageIdx0).filter(id => !(id in LOCATION_ITEMS));
-  if (ids.length) WS.send([{ cmd:'LocationScouts', locations: ids.map(Number), create_as_hint: 0 }]);
+  if (ids.length) WS.send([{ cmd:'LocationScouts', locations: ids.map(Number), create_as_hint: 2 }]);
 }
 function renderStageReward(levelNum, stageIdx0){
   const el = document.getElementById('stageReward'); if (!el) return;
@@ -916,8 +949,153 @@ function renderStageReward(levelNum, stageIdx0){
     const recvGame = (slot_map[String(recv)] || {}).game || '';
     const name = itemNameByGame(ni.item, recvGame);
     const who = (recv === Number(mySlotNumber)) ? 'you' : slotName(recv);
-    return colorSpan(name, itemFlagsColor(ni.flags)) + ' → ' + who;
+    return colorSpan(name, itemFlagsColor(ni.flags)) + ' → ' + escapeHTML(who);
   }).join('<br>');
+}
+
+// ---- Stage hover tooltip: preview a puzzle's reward classification without opening it ----
+// Hovering/focusing a stage button shows what completing it sends (classification + item + receiver).
+// For unlocked, not-yet-completed stages it also scouts the location with create_as_hint:2, sharing a
+// free hint so the item's receiver learns it lives here. This is DeathLink-safe (peeking never opens
+// the stage, so it can never trigger the leave-a-puzzle-unsolved DeathLink) and only ever hints
+// puzzles the player actually has (unlocked + unchecked) — never locked or completed ones.
+let TIP_CTX = null; // { levelNum, stageIdx0, unlocked, done, collected, ids } for the open tooltip
+
+function flagsLabel(flags){
+  const f = Number(flags || 0);
+  if (f & 1) return 'Progression';
+  if (f & 2) return 'Useful';
+  if (f & 4) return 'Trap';
+  return 'Filler';
+}
+
+// Scout a stage's reward location(s) so the tooltip can show what it sends. Uncompleted, unchecked
+// puzzles are scouted with create_as_hint:2 (shares a free hint — the receiver learns it lives here);
+// completed or already-checked ones are fetched with create_as_hint:0 (info only, no pointless hint
+// for an item that's already been found). HINT_SCOUTED dedupes the hint path so we never re-request a
+// hint the connect-time pass already sent. No-op if cached, disconnected, or in tryout mode.
+function hoverScout(levelNum, stageIdx0, done){
+  if (tryoutMode || !isConnected) return;
+  const hintIds = [], fetchIds = [];
+  for (const id of locationsForStageReward(levelNum, stageIdx0)){
+    const n = Number(id);
+    if (n in LOCATION_ITEMS) continue;                 // already have the data (already scouted)
+    if (!done && !checkedLocations.has(n)){
+      if (!HINT_SCOUTED.has(n)){ HINT_SCOUTED.add(n); hintIds.push(n); } // still-to-do puzzle -> hint once
+      // else: connect-pass already hinted it; its reply is pending, tooltip will refresh
+    } else {
+      fetchIds.push(n);                                // completed / already-checked -> info only
+    }
+  }
+  if (hintIds.length)  WS.send([{ cmd:'LocationScouts', locations: hintIds,  create_as_hint: 2 }]);
+  if (fetchIds.length) WS.send([{ cmd:'LocationScouts', locations: fetchIds, create_as_hint: 0 }]);
+}
+
+// Share hints (create_as_hint:2) for every unlocked, not-yet-checked puzzle we have — called on
+// connect and whenever new stages unlock, so receivers learn where their items are without the
+// player hovering each one. HINT_SCOUTED keeps it idempotent across its several call sites, and the
+// server only broadcasts each hint once (only_new).
+function hintUnlockedPuzzles(){
+  if (tryoutMode || !isConnected) return;
+  const ids = [];
+  for (const levelName in LEVEL_STATUS){
+    const L = LEVEL_STATUS[levelName];
+    if (!L || L.locked) continue;
+    const m = levelName.match(/Level\s+(\d+)/i); if (!m) continue;
+    const levelNum = Number(m[1]);
+    for (const sKey in L.stages){
+      if (L.stages[sKey].locked) continue;
+      for (const id of locationsForStageReward(levelNum, Number(sKey) - 1)){
+        const n = Number(id);
+        if (!checkedLocations.has(n) && !HINT_SCOUTED.has(n)){ HINT_SCOUTED.add(n); ids.push(n); }
+      }
+    }
+  }
+  if (ids.length) WS.send([{ cmd:'LocationScouts', locations: ids, create_as_hint: 2 }]);
+}
+
+// One tooltip row for a reward location: "<classification> → <receiver>" — no item name, by design.
+// We reveal how useful a puzzle is (and to whom) without spoiling the exact item. null if not scouted.
+function stageTipRow(id){
+  const ni = LOCATION_ITEMS[id];
+  if (!ni) return null;
+  const recv = Number(ni.player);
+  const who = (recv === Number(mySlotNumber)) ? 'you' : slotName(recv);
+  const clr = itemFlagsColor(ni.flags);
+  return `<div class="tip-row"><span class="tip-class" style="color:${clr}">${flagsLabel(ni.flags)}</span> `
+       + `<span class="tip-arrow">→</span> ${colorSpan(who, playerColor(recv))}</div>`;
+}
+
+function stageTipHTML(levelNum, stageIdx0, unlocked, done, collected){
+  if (tryoutMode) return '<div class="tip-muted">Tryout mode — no rewards.</div>';
+  if (!unlocked && !done) return '<div class="tip-locked">Locked</div>';
+  const ids = locationsForStageReward(levelNum, stageIdx0);
+  const rowHTML = ids.map(stageTipRow).filter(Boolean).join('');
+  const haveData = rowHTML.length > 0;
+
+  // Completed stages: show what they actually sent if we know it, else a clean status (never the
+  // awkward "This stage sent: Completed" that showed when the reward wasn't scouted).
+  if (collected)
+    return haveData ? `<div class="tip-head">Auto-completed:</div>${rowHTML}`
+                    : '<div class="tip-muted">Auto-completed.</div>';
+  if (done)
+    return haveData ? `<div class="tip-head">This stage sent:</div>${rowHTML}`
+                    : '<div class="tip-muted">✓ Completed.</div>';
+
+  if (!ids.length) return '<div class="tip-muted">No check tied to this stage.</div>';
+  const body = haveData ? rowHTML : '<div class="tip-muted">Checking…</div>';
+  return `<div class="tip-head">Completing sends:</div>${body}`;
+}
+
+function getStageTipEl(){
+  let tip = document.getElementById('stageTip');
+  if (!tip){ tip = document.createElement('div'); tip.id = 'stageTip'; tip.className = 'stage-tip'; document.body.appendChild(tip); }
+  return tip;
+}
+
+function showStageTip(btn, levelNum, stageIdx0, unlocked, done, collected){
+  const tip = getStageTipEl();
+  tip.innerHTML = stageTipHTML(levelNum, stageIdx0, unlocked, done, collected);
+  tip.style.display = 'block';
+  const r = btn.getBoundingClientRect();
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  let top = r.top - th - 8;
+  if (top < 6) top = r.bottom + 8;               // flip below the button if there's no room above
+  let left = r.left + r.width / 2 - tw / 2;
+  left = Math.max(6, Math.min(left, window.innerWidth - tw - 6));
+  tip.style.left = left + 'px';
+  tip.style.top  = top + 'px';
+  TIP_CTX = { levelNum, stageIdx0, unlocked, done, collected, ids: locationsForStageReward(levelNum, stageIdx0) };
+}
+
+function hideStageTip(){
+  const tip = document.getElementById('stageTip');
+  if (tip) tip.style.display = 'none';
+  TIP_CTX = null;
+}
+
+// Re-render the open tooltip when a scout reply arrives for the stage it's showing (so "Checking…"
+// resolves to the real item without needing to re-hover).
+function refreshStageTip(locations){
+  if (!TIP_CTX || !TIP_CTX.ids.length) return;
+  const arrived = new Set((locations || []).map(l => Number(l.location)));
+  if (!TIP_CTX.ids.some(id => arrived.has(id))) return;
+  const tip = document.getElementById('stageTip');
+  if (tip && tip.style.display !== 'none'){
+    tip.innerHTML = stageTipHTML(TIP_CTX.levelNum, TIP_CTX.stageIdx0, TIP_CTX.unlocked, TIP_CTX.done, TIP_CTX.collected);
+  }
+}
+
+// Wire hover/focus preview onto a stage button. Scouts (hints) only unlocked, not-yet-completed stages.
+function attachStageTip(btn, levelNum, stageIdx0, unlocked, done, collected){
+  const show = ()=>{
+    if (unlocked || done) hoverScout(levelNum, stageIdx0, done);
+    showStageTip(btn, levelNum, stageIdx0, unlocked, done, collected);
+  };
+  btn.addEventListener('mouseenter', show);
+  btn.addEventListener('focus', show);
+  btn.addEventListener('mouseleave', hideStageTip);
+  btn.addEventListener('blur', hideStageTip);
 }
 
 function titleCase(s){
@@ -931,49 +1109,57 @@ function slotDisplay(slotId){
   return s.slot_name ? `${s.slot_name}${game}` : `Slot ${slotId}`;
 }
 
-function resolveApFlowFreeItemLabel(itemId){
-  const id = Number(itemId);
-  const raw = idToItemName[id];
-  if (raw) {
-    if (/^Level\s+\d+\s+Stages$/i.test(raw)) return raw; // exact unlock item
-    if (/^Flow Bonus$/i.test(raw)) return 'Flow Bonus';
-    // If APFlowFree ever adds other named items, show them verbatim:
-    return raw;
-  }
-  // No mapping yet (shouldn't happen if we defer); safe fallback:
-  return unlockItemIds.has(id) ? 'Level Stages' : 'Flow Bonus';
-}
-
 function logReceivedItems(items){
   if (!items || !items.length) return;
   const lines = items.map(it => {
-    const label  = resolveApFlowFreeItemLabel(it.item);
-    return `• ${label} received from ${slotDisplay(it.player)}`;
+    const label  = itemNameFromId(it.item);
+    return `• ${escapeHTML(label)} received from ${escapeHTML(slotDisplay(it.player))}`;
   });
   const header = `Received ${items.length} item${items.length>1?'s':''}:`;
   hubLog(header + '<br>' + lines.join('<br>'));
   playerLog(header + '<br>' + lines.join('<br>'));
 }
 
-function updateStatus(txt, warn=false){ const el=document.getElementById('status'); el.textContent=txt; el.style.color = warn? currentTheme.logColors.trap : ''; hubLog(txt) }
+function updateStatus(txt, warn=false){ const el=document.getElementById('status'); el.textContent=txt; el.style.color = warn? currentTheme.logColors.trap : ''; hubLog(escapeHTML(txt)) }
 
 function requestSavedProgress(){
   const progKey = `FlowFree_${currentSlot}_completed_levels`;
   consumablesKey = `FlowFree_${currentSlot}_consumables`;   // AP data storage; the server scopes it to this room
   WS.send([{cmd:'Get', keys:[progKey, consumablesKey]}]);
 }
-function pushSavedProgressToServer(){
+// 'update' per level instead of replacing the blob, so another device saving a different level isn't clobbered.
+function pushSavedProgressToServer(levelNames){
   const keyName = `FlowFree_${currentSlot}_completed_levels`;
   const progress = getProgress(currentSlot) || {};
-  WS.send([{ cmd:'Set', key:keyName, want_reply:false, default:{}, operations:[{operation:'replace', value:progress}] }]);
+  const value = {};
+  for (const n of (levelNames || Object.keys(progress))) if (progress[n]) value[n] = progress[n];
+  if (!Object.keys(value).length) return;
+  WS.send([{ cmd:'Set', key:keyName, want_reply:false, default:{}, operations:[{operation:'update', value}] }]);
+}
+
+// Merge server progress with memory (e.g. stages solved while offline). A real solve beats a collected
+// marker, otherwise the server wins. Levels with stages the server lacks get pushed back.
+function mergeServerProgress(server){
+  const local = getProgress(currentSlot) || {};
+  const merged = {}, pushBack = [];
+  for (const lvl of new Set([...Object.keys(server || {}), ...Object.keys(local)])){
+    const srv = (server && server[lvl]) || {}, loc = local[lvl] || {};
+    merged[lvl] = {};
+    for (const s of new Set([...Object.keys(srv), ...Object.keys(loc)])){
+      const a = srv[s], b = loc[s];
+      merged[lvl][s] = (a && !a.__collected) ? a : (b && !b.__collected) ? b : (a || b);
+    }
+    if (Object.keys(loc).some(s => !srv[s])) pushBack.push(lvl);
+  }
+  setProgress(currentSlot, merged);
+  if (pushBack.length) pushSavedProgressToServer(pushBack);
 }
 
 function getLevelInfo(){
   const nLevels = Number(slot_data.number_of_levels || 10);
   const stagesPer = Number(slot_data.stages_per_level || 10);
-  const checksPer = Number(slot_data.checks_per_level || 1);
   const seeds = slot_data.seeds || {};
-  return { nLevels, stagesPer, checksPer, seeds };
+  return { nLevels, stagesPer, seeds };
 }
 
 function isStrictNoSelfParallel() {
@@ -996,7 +1182,7 @@ function sendLocationChecks(ids){
 
   for (const id of fresh){
     SENT_LOCATION_IDS.add(id);
-    const name = idToLocationName[id] || `Location ${id}`;
+    const name = escapeHTML(idToLocationName[id] || `Location ${id}`);
     hubLog(`Checked: ${name}`);
     playerLog(`Checked: ${name}`);
   }
@@ -1055,37 +1241,63 @@ function sendSync(){
   hubLog('Sent Sync');
 }
 
-function maybeSendGoalIfMet(){
-  const goalMode = Number(slot_data.goal || 1);
-  const pct = Number(slot_data.goal_percentage || 80);
+// Single source of truth for goal progress — used by BOTH the menu counters and maybeSendGoalIfMet,
+// so the number the player sees can never disagree with when the goal actually fires. Auto-completed
+// (collected) stages count exactly like solved ones: both are keys in the progress map.
+// Returns { mode, pct, sanity, nLevels, stagesPer, need, levels:[{name,done,need,met}],
+//           met, count, total, headline }.
+function goalProgress(){
+  const mode   = Number(slot_data.goal || 1);
+  const pct    = Number(slot_data.goal_percentage || 80);
+  const sanity = getStageSanity();
   const { nLevels, stagesPer } = getLevelInfo();
   const completed = getProgress(currentSlot) || {};
-  const allLevels = Array.from({length:nLevels}, (_,i)=> `Level ${i+1}`);
   const stagesDone = (level)=> Object.keys(completed[level] || {}).length;
-  let goalMet = false;
-  if (goalMode === 1){
-    goalMet = allLevels.every(l => stagesDone(l) >= stagesPer);
-  } else if (goalMode === 2){
-    // "80% of stages per level" is only representable as location checks under stage_sanity 3
-    // (one check per stage); for sanity 1/2 it collapses to full completion so the client and
-    // the apworld's completion_condition agree on when the goal is met.
-    if (getStageSanity() !== 3){
-      goalMet = allLevels.every(l => stagesDone(l) >= stagesPer);
-    } else {
-      const threshold = Math.floor(stagesPer * pct / 100 + 0.5);
-      goalMet = allLevels.every(l => stagesDone(l) >= threshold);
-    }
-  } else if (goalMode === 3){
-    const fully = allLevels.filter(l => stagesDone(l) >= stagesPer).length;
-    const required = Math.floor(nLevels * pct / 100 + 0.5);
-    goalMet = (fully >= required);
+
+  // Stages needed per level. The goal is INDEPENDENT of stage_sanity: stage_sanity only controls how
+  // stages/levels unlock, not what the goal requires. So goal 2's percentage applies on every sanity,
+  // measured against stages the player has actually completed. Clamped the way Rules.py clamps.
+  let need = stagesPer;
+  if (mode === 2){
+    need = Math.max(1, Math.min(stagesPer, Math.floor(stagesPer * pct / 100 + 0.5)));
   }
-  if (goalMet && !goalReported){
-    goalReported = true;
-    hubLog('Goal condition met — sending StatusUpdate & Sync');
-    sendStatusUpdate(30);
-    sendSync();
+
+  const levels = [];
+  for (let i = 1; i <= nLevels; i++){
+    const name = `Level ${i}`;
+    const done = Math.min(stagesDone(name), stagesPer);
+    levels.push({ name, done, need, met: done >= need });
   }
+
+  if (mode === 3){
+    const required  = Math.max(1, Math.min(nLevels, Math.floor(nLevels * pct / 100 + 0.5)));
+    const fullyDone = levels.filter(l => l.done >= stagesPer).length;
+    return { mode, pct, sanity, nLevels, stagesPer, need: stagesPer, levels,
+             met: fullyDone >= required, count: fullyDone, total: required,
+             headline: `Goal: fully complete ${pct}% of levels` };
+  }
+  const metCount = levels.filter(l => l.met).length;
+  const headline = (mode === 2 && need < stagesPer)
+    ? `Goal: ${pct}% of every level (${need} of ${stagesPer} stages)`
+    : 'Goal: every stage in every level';
+  return { mode, pct, sanity, nLevels, stagesPer, need, levels,
+           met: levels.every(l => l.met), count: metCount, total: nLevels, headline };
+}
+
+function goalBarHTML(gp){
+  const noun = gp.mode === 3 ? 'levels fully complete' : 'levels done';
+  return `<span class="goal-text">${gp.headline}</span>`
+       + `<span class="goal-count${gp.met ? ' met' : ''}">${gp.count}/${gp.total} ${noun}</span>`
+       + (gp.met ? '<span class="goal-met">✓ Goal met</span>' : '');
+}
+
+function maybeSendGoalIfMet(){
+  if (goalReported) return;
+  if (!goalProgress().met) return;
+  goalReported = true;
+  hubLog('Goal condition met — sending StatusUpdate & Sync');
+  sendStatusUpdate(30);
+  sendSync();
 }
 function resendAllFulfilledChecks(){
   const { nLevels, stagesPer } = getLevelInfo();
@@ -1139,13 +1351,27 @@ function renderMenu(){
   const { nLevels, stagesPer } = getLevelInfo();
   const progress = getProgress(currentSlot) || {};
 
+  // Goal progress drives both the summary bar and the per-level counters (same source as the check).
+  const gp = goalProgress();
+  const bar = document.getElementById('goalBar');
+  if (bar) bar.innerHTML = goalBarHTML(gp);
+
   for (let i = 1; i <= nLevels; i++){
     const name = `Level ${i}`;
     const lvlDiv = document.createElement('div');
     lvlDiv.className = 'level';
 
     const title = document.createElement('h3');
-    title.textContent = name;
+    title.appendChild(document.createTextNode(name));
+    const li = gp.levels[i - 1];
+    if (li){
+      const cnt = document.createElement('span');
+      cnt.className = 'lvl-count' + (li.met ? ' met' : '');
+      cnt.textContent = `${li.done}/${li.need}`;
+      cnt.title = li.met ? 'This level meets the goal'
+                         : `${li.need - li.done} more stage${li.need - li.done === 1 ? '' : 's'} to meet the goal`;
+      title.appendChild(cnt);
+    }
     lvlDiv.appendChild(title);
 
     const row = document.createElement('div');
@@ -1160,20 +1386,28 @@ function renderMenu(){
       // done state — distinguish an actual solve from an auto-complete (item already collected)
       const cell = progress[name] && progress[name][s];
       const done = !!(cell && Object.keys(cell).length);
+      const collected = !!(done && cell.__collected);
       if (done){
-        if (cell.__collected){ btn.classList.add('collected'); btn.title = 'Auto-completed — the item here was already collected'; }
+        if (collected) btn.classList.add('collected');
         else btn.classList.add('done');
       }
 
       // lock gating from LEVEL_STATUS
       const lvlUnlocked   = isLevelUnlocked(name);
       const stageUnlocked = isStageUnlocked(name, stageIdx1);
+      const stageUsable   = lvlUnlocked && stageUnlocked;
 
-      if (!(lvlUnlocked && stageUnlocked)) {
+      if (!stageUsable) {
         btn.setAttribute('disabled','');
       } else {
         btn.addEventListener('click', ()=> startStage(name, s, (slot_data.seeds||{}), i));
       }
+
+      // Hover/focus preview: show the reward's item classification without opening the stage (so we
+      // never risk a DeathLink from backing out just to peek). For unlocked, uncompleted stages this
+      // also shares a free hint (create_as_hint:2) so the item's receiver learns it lives here —
+      // hints go out only for puzzles we actually have.
+      attachStageTip(btn, i, s, stageUsable, done, collected);
 
       row.appendChild(btn);
     }
@@ -1214,7 +1448,11 @@ function itemFlagsColor(flags){
   return currentTheme.logColors.filler;
 }
 
-function colorSpan(text, color){ return `<span style="color:${color}">${text}</span>`; }
+// For names from other players or the server before they go into innerHTML.
+function escapeHTML(s){
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+function colorSpan(text, color){ return `<span style="color:${color}">${escapeHTML(text)}</span>`; }
 
 function slotName(slotId){
   const s = slot_map[String(slotId)] || {};
@@ -1256,7 +1494,7 @@ WS.onMessage((msgs)=>{
   for(const msg of arr){
     const cmd=msg.cmd;
     if(cmd==='Connected'){
-      isConnected=true; currentSlot = document.getElementById('slot').value.trim(); slot_data = msg.slot_data || {}; mySlotNumber = msg.slot; hubLog('Connected');
+      isConnected=true; currentSlot = WS.slot; slot_data = msg.slot_data || {}; mySlotNumber = msg.slot; hubLog('Connected');
       const info = msg.slot_info || {}; slot_map={}; Object.keys(info).forEach(k=>{ slot_map[String(k)]={ slot_name: info[k].name || 'Unknown', game: info[k].game || 'Unknown' } });
       WS.send([{cmd:'GetDataPackage'}]); requestSavedProgress();
       document.getElementById('loginGrid').style.display='none'; document.getElementById('menu').style.display='block';
@@ -1269,6 +1507,7 @@ WS.onMessage((msgs)=>{
       consumablesLoaded = false;
       PENDING_TRAP_ITEMS = [];
       LOCATION_ITEMS = {};   // re-scout reward previews fresh for this connection
+      HINT_SCOUTED = new Set(); // re-send unlocked-puzzle hints fresh for this connection
       checkedLocations = new Set((msg.checked_locations || []).map(Number)); // already-checked (solved or collected)
       goalReported = false; // re-evaluate/report the goal fresh for this connection
       // DeathLink: advertise the tag now that slot_data is known (Connect is sent before slot_data).
@@ -1305,35 +1544,38 @@ WS.onMessage((msgs)=>{
         }
       }catch{ itemNameToId = {}; locationNameToId = {}; allGameItems = {}; allGameLocations = {}; }
       buildReverseMaps();
+      logReceivedItems(PENDING_LOG_ITEMS.splice(0));
       if (PENDING_RECEIVED_ITEMS.length){
-        const items = PENDING_RECEIVED_ITEMS.splice(0, PENDING_RECEIVED_ITEMS.length);
-        logReceivedItems(items);
-        processUnlocksForItems(items);
+        processUnlocksForItems(PENDING_RECEIVED_ITEMS.splice(0));
       }
       maybeFireTraps(); // names are now available; fire any queued traps once
       syncCheckedLocations(); // location ids are mappable now; mark any already-checked stages done
       renderMenu();
+      hintUnlockedPuzzles(); // share hints for every unlocked puzzle now that unlocks + maps are known
     }
     else if (cmd === 'ReceivedItems'){
       const items = Array.isArray(msg.items) ? msg.items : [];
       const startIndex = Number(msg.index || 0);
       const pkgReady = Object.keys(idToItemName).length > 0;
+      const unlogged = items.slice(Math.max(0, ITEMS_LOGGED - startIndex));
+      ITEMS_LOGGED = Math.max(ITEMS_LOGGED, startIndex + items.length);
       if (!pkgReady) {
-        PENDING_RECEIVED_ITEMS.push(...items);
+        PENDING_RECEIVED_ITEMS.push(...items);   // all of them: unlocks are replayed from this queue
+        PENDING_LOG_ITEMS.push(...unlogged);
       } else {
-        logReceivedItems(items);
+        logReceivedItems(unlogged);
       }
       processUnlocksForItems(items);
       // Queue each item with its absolute stream position so traps fire exactly once.
       for (let j = 0; j < items.length; j++){ PENDING_TRAP_ITEMS.push({ absIdx: startIndex + j, item: items[j] }); }
       maybeFireTraps();
       renderMenu();
+      hintUnlockedPuzzles(); // newly-unlocked puzzles get hinted immediately
     }
     else if(cmd==='Retrieved'){
       const results = msg.keys || {}; const keyName = `FlowFree_${currentSlot}_completed_levels`;
       if(Object.prototype.hasOwnProperty.call(results, keyName)){
-        const server = results[keyName] || {};
-        setProgress(currentSlot, server);
+        mergeServerProgress(results[keyName] || {});
         syncCheckedLocations(); // merge any already-checked (solved-elsewhere / collected) stages
         renderMenu();
         try { Player.hydrateFromSaved && Player.hydrateFromSaved(); } catch {}
@@ -1359,11 +1601,7 @@ WS.onMessage((msgs)=>{
       // Free scout reply: remember the item at each scouted location, refresh the reward preview.
       for (const ni of (msg.locations || [])) LOCATION_ITEMS[Number(ni.location)] = ni;
       renderStageReward();
-    }
-    else if(cmd==='RoomInfo'){
-      // Arrives before Connected. Item state is keyed in AP data storage by slot (the server scopes
-      // it to this room), so seed_name isn't needed for that; kept for reference/logging.
-      roomSeedName = msg.seed_name || roomSeedName;
+      refreshStageTip(msg.locations);
     }
     else if(cmd==='RoomUpdate'){
       // Fires when locations get checked live — including when another player goals and collects an
@@ -1397,9 +1635,12 @@ const addressEl=document.getElementById('address');
 const slotEl=document.getElementById('slot');
 const passEl=document.getElementById('password');
 function doConnect(){
-  const address=addressEl.value.trim()||'192.168.4.49:38281';
+  const address=addressEl.value.trim();
   const slot=slotEl.value.trim(); const password=passEl.value;
+  if(!address){ updateStatus('Enter a server address (e.g. archipelago.gg:38281)', true); return }
   if(!slot){ updateStatus('Enter a slot name', true); return }
+  ITEMS_LOGGED = 0; PENDING_LOG_ITEMS = []; // fresh connect (maybe another slot): log its full history once
+  progressMem = {}; // a fresh connect may be a different room with the same slot name — never merge across rooms
   saveConfig({address, slot, password}); updateStatus('Connecting…'); WS.connect(address, slot, password);
 }
 function doResync(){ requestSavedProgress(); renderMenu(); updateStatus('Resync requested'); SENT_LOCATION_IDS.clear(); resendAllFulfilledChecks(); }
@@ -1409,7 +1650,7 @@ function doDisconnect(){ try{ WS.close(); }catch{} isConnected=false; document.g
 document.getElementById('btnConnect').addEventListener('click', doConnect);
 document.getElementById('btnResync').addEventListener('click', doResync);
 document.getElementById('btnDisconnect').addEventListener('click', doDisconnect);
-document.getElementById('btnClear').addEventListener('click', ()=>{ localStorage.removeItem(CFG_KEY); updateStatus('Cleared saved config'); });
+document.getElementById('btnClear').addEventListener('click', ()=>{ lsRemove(CFG_KEY); updateStatus('Cleared saved config'); });
 document.getElementById('btnBack').addEventListener('click', ()=>{
   maybeSendDeathLink();
   if (tryoutMode){ showView('view-tryout'); renderTryoutMenu(); }
@@ -1518,7 +1759,7 @@ class Mitm{ constructor(lr_price, t_price, rand){ this.lr_price=lr_price; this.t
 }
 function has_loops(grid, uf){ const groups=new Set(); for(let y=0;y<grid.h;y++){ for(let x=0;x<grid.w;x++){ groups.add(uf.find([x,y])) } } let ends=0; for(let y=0;y<grid.h;y++){ for(let x=0;x<grid.w;x++){ const v=grid.get(x,y); if('v^<>'.indexOf(v)!==-1) ends++ } } return ends !== 2*groups.size }
 function has_pair(tg, uf){ for(let y=0;y<tg.h;y++){ for(let x=0;x<tg.w;x++){ const dxdy=[[1,0],[0,1]]; for(let i=0;i<dxdy.length;i++){ const dx=dxdy[i][0], dy=dxdy[i][1]; const x1=x+dx, y1=y+dy; if(x1<tg.w && y1<tg.h){ if(tg.get(x,y)==='x' && tg.get(x1,y1)==='x' && uf.find([x,y])===uf.find([x1,y1])) return true } } } } return false }
-function has_tripple(tg, uf){ for(let y=0;y<tg.h;y++){ for(let x=0;x<tg.h;x++){ const r=uf.find([x,y]); let n=0; const deltas=[[1,0],[0,1],[-1,0],[0,-1]]; for(let i=0;i<deltas.length;i++){ const x1=x+deltas[i][0], y1=y+deltas[i][1]; if(0<=x1&&x1<tg.w && 0<=y1&&y1<tg.h && uf.find([x1,y1])===r) n++; } if(n>=3) return true } } return false }
+function has_tripple(tg, uf){ for(let y=0;y<tg.h;y++){ for(let x=0;x<tg.w;x++){ const r=uf.find([x,y]); let n=0; const deltas=[[1,0],[0,1],[-1,0],[0,-1]]; for(let i=0;i<deltas.length;i++){ const x1=x+deltas[i][0], y1=y+deltas[i][1]; if(0<=x1&&x1<tg.w && 0<=y1&&y1<tg.h && uf.find([x1,y1])===r) n++; } if(n>=3) return true } } return false }
 function generate_puzzle(opts, _depth){
   _depth = _depth || 0;
   const pairs=(opts && typeof opts.pairs!=="undefined")?opts.pairs:5;
@@ -1831,6 +2072,7 @@ function goToSiblingStage(delta){
   } else {
     const { stagesPer, seeds } = getLevelInfo();
     if (nextIdx < 0 || nextIdx >= stagesPer) return;
+    maybeSendDeathLink(); // leaving an unsolved stage via Prev/Next counts the same as Back
     startStage(levelName, nextIdx, seeds, levelNum);
   }
 }
@@ -2089,7 +2331,7 @@ function checkWin() {
       prog[STATE.meta.level] = prog[STATE.meta.level] || {};
       prog[STATE.meta.level][STATE.meta.stage] = STATE.paths || {};
       setProgress(STATE.meta.slot, prog);
-      pushSavedProgressToServer();
+      pushSavedProgressToServer([STATE.meta.level]);
 
       const toSend = locationsToSendAfterStage(STATE.meta.level, STATE.meta.stage);
       if (toSend.length) {
@@ -2186,7 +2428,7 @@ function applyPuzzle(p){
   recomputeCell();
   const info=document.getElementById('serverInfo');
   info.textContent = `Slot: ${STATE.meta.slot || '—'} • ${STATE.meta.level || '—'} • Stage ${Number(STATE.meta.stage)+1} • Seed ${STATE.meta.seed}`;
-  playerLog(`Loaded puzzle ${STATE.meta.level} - Stage ${Number(STATE.meta.stage)+1}`);
+  playerLog(`Loaded puzzle ${escapeHTML(STATE.meta.level)} - Stage ${Number(STATE.meta.stage)+1}`);
   updatePrevNextButtons();
 
   // hydrate from server-saved progress (if any)
@@ -2214,12 +2456,13 @@ function applyPuzzle(p){
   }
 
   // Player buttons
-  document.getElementById('resetBtn').addEventListener('click', ()=>{
+  function resetBoard(){
     if(!STATE.puzzle) return;
     STATE.paths={}; STATE.gridState=Array.from({length:STATE.puzzle.rows},()=> Array(STATE.puzzle.cols).fill(null));
     if (BANNER_TIMEOUT){ clearTimeout(BANNER_TIMEOUT); BANNER_TIMEOUT = null; }
-    drawGrid(); document.getElementById('winBanner').classList.remove('show'); playerLog('Board reset')
-  });
+    drawGrid(); document.getElementById('winBanner').classList.remove('show'); playerLog('Board reset');
+  }
+  document.getElementById('resetBtn').addEventListener('click', resetBoard);
   document.getElementById('exportBtn').addEventListener('click', ()=>{
     if(!STATE.puzzle) return;
     const payload={...STATE.puzzle, meta:STATE.meta};
@@ -2244,12 +2487,7 @@ function applyPuzzle(p){
   // Mobile toolbar buttons (must be inside IIFE to access goToSiblingStage, STATE, drawGrid, etc.)
   document.getElementById('mobilePrev').addEventListener('click', ()=> goToSiblingStage(-1));
   document.getElementById('mobileNext').addEventListener('click', ()=> goToSiblingStage(+1));
-  document.getElementById('mobileReset').addEventListener('click', ()=>{
-    if(!STATE.puzzle) return;
-    STATE.paths={}; STATE.gridState=Array.from({length:STATE.puzzle.rows},()=> Array(STATE.puzzle.cols).fill(null));
-    if (BANNER_TIMEOUT){ clearTimeout(BANNER_TIMEOUT); BANNER_TIMEOUT = null; }
-    drawGrid(); document.getElementById('winBanner').classList.remove('show'); playerLog('Board reset');
-  });
+  document.getElementById('mobileReset').addEventListener('click', resetBoard);
 
   // ----- Trap effects (invoked by the main-scope trap dispatcher) -----
   // Board Clear: wipe only the live in-progress board (never the saved/committed progress).
@@ -2407,7 +2645,7 @@ document.getElementById('mobileBack').addEventListener('click', ()=>{
  ********************************/
 (function boot(){
   // Apply saved theme
-  applyTheme(localStorage.getItem(THEME_LS_KEY) || 'dark-blue');
+  applyTheme(lsGet(THEME_LS_KEY) || 'dark-blue');
   const cfg=loadConfig(); if(cfg.address) addressEl.value=cfg.address; if(cfg.slot) slotEl.value=cfg.slot; if(cfg.password) passEl.value=cfg.password;
   const h=location.hash||'';
   if(h.startsWith('#play?')){
