@@ -225,7 +225,9 @@
         display:flex; justify-content:center; gap:6px; padding:6px 4px;
         order:2;
       }
-      .mobile-toolbar .btn{ padding:8px 12px; font-size:12px; flex:1; text-align:center }
+      .mobile-toolbar{ gap:4px }
+      .mobile-toolbar .btn{ padding:8px 4px; font-size:12px; flex:1 1 0; min-width:0; text-align:center; white-space:nowrap }
+      .mobile-toolbar #mobileNextUnsolved{ flex-grow:1.3 }
     }
 
     /* Loading / "generating puzzle" overlay (big boards can take a few seconds to build) */
@@ -328,6 +330,7 @@
           <button class="btn" id="mobileBack">Back</button>
           <button class="btn" id="mobileReset">Reset</button>
           <button class="btn" id="mobileNext">Next →</button>
+          <button class="btn" id="mobileNextUnsolved" title="Next unsolved stage">Unsolved ⇥</button>
         </div>
         <aside class="sidebar">
           <div class="card howtoplay">
@@ -350,6 +353,9 @@
   			  <button class="btn" id="prevBtn">Previous puzzle</button>
   			  <button class="btn" id="nextBtn">Next puzzle</button>
 			</div>
+            <div class="row" style="margin-top:8px">
+              <button class="btn" id="nextUnsolvedBtn" title="Jump to the next open stage you haven't finished">Next unsolved stage</button>
+            </div>
             <div class="row" style="margin-top:8px">
               <button class="btn" id="resetBtn">Reset board</button>
               <button class="btn" id="exportBtn">Export puzzle JSON</button>
@@ -389,6 +395,7 @@
     <button class="theme-btn" data-theme-id="oled" title="OLED Black"><span class="theme-swatch" style="background:#000000; border-color:#222"></span><span class="theme-label">OLED</span></button>
     <button class="theme-btn" data-theme-id="light" title="Light"><span class="theme-swatch" style="background:#f5f2ed; border-color:#c5c0b8"></span><span class="theme-label">Light</span></button>
     <button class="theme-btn" data-theme-id="white" title="White"><span class="theme-swatch" style="background:#ffffff; border-color:#d4d4d4"></span><span class="theme-label">White</span></button>
+    <button class="theme-btn" id="cbToggle" aria-pressed="false" title="Show a number on each color's endpoints so pairs don't rely on telling colors apart"><span class="theme-label">Colorblind labels</span></button>
   </div>
   <div class="small" style="padding:0 16px 8px; text-align:center">Please report issues on GitHub or feel free to post in the Archipelago Discord thread.</div>
 
@@ -442,18 +449,31 @@ function applyTheme(themeKey){
   currentTheme = THEMES[themeKey];
   if (themeKey === 'dark-blue') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.setAttribute('data-theme', themeKey);
-  document.querySelectorAll('.theme-btn').forEach(btn => {
+  document.querySelectorAll('.theme-btn[data-theme-id]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.themeId === themeKey);
   });
   lsSet(THEME_LS_KEY, themeKey);
   if (typeof Player !== 'undefined' && Player.redraw) try{ Player.redraw(); }catch(e){}
 }
 
+// Colorblind labels: a number on each endpoint (see drawEndpointLabel). Per-browser setting.
+const CB_LS_KEY = 'apflowfree-colorblind';
+let colorblindLabels = lsGet(CB_LS_KEY) === '1';
+function setColorblindLabels(on){
+  colorblindLabels = !!on;
+  lsSet(CB_LS_KEY, colorblindLabels ? '1' : '0');
+  const b = document.getElementById('cbToggle');
+  if (b){ b.classList.toggle('active', colorblindLabels); b.setAttribute('aria-pressed', String(colorblindLabels)); }
+  if (typeof Player !== 'undefined' && Player.redraw) try{ Player.redraw(); }catch(e){}
+}
+
 // Wire up theme picker buttons
 document.addEventListener('DOMContentLoaded', function(){
-  document.querySelectorAll('.theme-btn').forEach(btn => {
+  document.querySelectorAll('.theme-btn[data-theme-id]').forEach(btn => {
     btn.addEventListener('click', () => applyTheme(btn.dataset.themeId));
   });
+  document.getElementById('cbToggle').addEventListener('click', () => setColorblindLabels(!colorblindLabels));
+  setColorblindLabels(colorblindLabels);
 });
 
 /********************************
@@ -1423,6 +1443,7 @@ function renderMenu(){
     lvlDiv.appendChild(row);
     levelsEl.appendChild(lvlDiv);
   }
+  if (typeof Player !== 'undefined' && Player.refreshNav) Player.refreshNav(); // unlocks can open new stages mid-puzzle
 }
 
 function getPairsForLevel(levelIndex, cfg){
@@ -1469,6 +1490,33 @@ function openStageKeys(){
   }
   return out;
 }
+function isStageDone(levelName, stageIdx){
+  const prog = tryoutMode ? tryoutProgress : (getProgress(currentSlot) || {});
+  return !!(prog[levelName] && prog[levelName][stageIdx]);
+}
+// Next open, unfinished stage after the given one in menu order, wrapping to the top. null if none.
+function findNextUnsolvedStage(levelName, stageIdx){
+  let keys = [];
+  if (tryoutMode){
+    for (let L = 1; L <= TRYOUT_LEVELS; L++) for (let s = 0; s < TRYOUT_STAGES; s++)
+      if (!isStageDone(`Level ${L}`, s)) keys.push(`Level ${L}|${s}`);
+  } else keys = openStageKeys();
+  const ord = k => { const [n, s] = k.split('|'); return Number(n.replace(/\D+/g, '')) * 1000 + Number(s); };
+  const here = ord(`${levelName}|${stageIdx}`);
+  const others = keys.filter(k => ord(k) !== here);
+  if (!others.length) return null;
+  const k = others.find(k => ord(k) > here) || others[0];
+  const [name, s] = k.split('|');
+  return { levelName: name, stageIdx: Number(s), levelNum: Number(name.replace(/\D+/g, '')) };
+}
+function goToNextUnsolved(){
+  const meta = Player.getMeta();
+  const t = findNextUnsolvedStage(meta.level, meta.stage); if (!t) return;
+  maybeSendDeathLink(); // same as Back/Prev/Next when leaving an unsolved stage
+  if (tryoutMode) startTryoutStage(t.levelName, t.stageIdx, t.levelNum);
+  else startStage(t.levelName, t.stageIdx, slot_data.seeds, t.levelNum);
+}
+
 function jobForKey(k){
   const [name, s] = k.split('|');
   const L = Number(name.replace(/\D+/g, ''));
@@ -2145,6 +2193,7 @@ function drawGrid(){
     strokePath(STATE.current, pw, cmap[STATE.active]||'#fff');
   }
   // Endpoints (faded during Fog so the player must work from memory; pipes stay visible)
+  const showLabels = colorblindLabels && !(Date.now() < GRAY_UNTIL);
   ctx.save(); ctx.globalAlpha = fog ? 0.16 : 1;
   for(let y=0;y<rows;y++){
     for(let x=0;x<cols;x++){
@@ -2154,10 +2203,24 @@ function drawGrid(){
         const x1=x*CELL, y1=y*CELL;
         ctx.fillStyle=color; ctx.strokeStyle=currentTheme.circleStroke; ctx.lineWidth=1.5;
         ctx.beginPath(); ctx.arc(x1+CELL/2, y1+CELL/2, CELL/2-6, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+        if (showLabels) drawEndpointLabel(color, x1+CELL/2, y1+CELL/2);
       }
     }
   }
   ctx.restore();
+}
+
+// Colorblind labels: the number follows the displayed colour, so Color Shuffle shuffles the numbers
+// too. Hidden during Grayscale so the trap costs everyone the same information.
+const PIPE_LABELS = {}; Object.values(PIPE_COLORS).forEach((hex, i)=> PIPE_LABELS[hex.toLowerCase()] = i + 1);
+function drawEndpointLabel(color, cx, cy){
+  const n = PIPE_LABELS[String(color).toLowerCase()]; if (!n) return;
+  const v = parseInt(color.slice(1, 7), 16);
+  const lum = 0.299*((v>>16)&255) + 0.587*((v>>8)&255) + 0.114*(v&255);
+  ctx.fillStyle = lum > 150 ? '#111' : '#fff';
+  ctx.font = `700 ${Math.max(10, Math.round(CELL * (n > 9 ? 0.32 : 0.38)))}px system-ui, -apple-system, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(String(n), cx, cy + 1);
 }
 
 function resizeCanvas(rows, cols){
@@ -2291,6 +2354,16 @@ function updatePrevNextButtons(){
   const next = document.getElementById('nextBtn');
   const mPrev = document.getElementById('mobilePrev');
   const mNext = document.getElementById('mobileNext');
+
+  // Next unsolved: enabled when another open stage is left; highlighted once this one is done.
+  const target = STATE.meta.level ? findNextUnsolvedStage(STATE.meta.level, idx) : null;
+  const doneHere = !!STATE.meta.level && isStageDone(STATE.meta.level, idx);
+  for (const id of ['nextUnsolvedBtn', 'mobileNextUnsolved']){
+    const b = document.getElementById(id); if (!b) continue;
+    b.disabled = !target;
+    b.classList.toggle('primary', !!target && doneHere);
+    b.title = target ? `Next unsolved: ${target.levelName}, Stage ${target.stageIdx + 1}` : 'No unsolved stages open';
+  }
 
   if (tryoutMode){
     const pDis = idx <= 0;
@@ -2595,6 +2668,10 @@ function checkWin() {
       }
       maybeSendGoalIfMet();
     }
+    updatePrevNextButtons();
+    const nu = findNextUnsolvedStage(STATE.meta.level, STATE.meta.stage);
+    if (nu) PuzzleGen.prefetch([tryoutMode ? tryoutStageParams(nu.levelName, nu.stageIdx, nu.levelNum)
+                                           : stageParams(nu.levelName, nu.stageIdx, nu.levelNum)], true);
     return true;
 }
 
@@ -2743,6 +2820,8 @@ function unloadBoard(){
   });
   document.getElementById('prevBtn').addEventListener('click', ()=> goToSiblingStage(-1));
   document.getElementById('nextBtn').addEventListener('click', ()=> goToSiblingStage(+1));
+  document.getElementById('nextUnsolvedBtn').addEventListener('click', goToNextUnsolved);
+  document.getElementById('mobileNextUnsolved').addEventListener('click', goToNextUnsolved);
 
   // Trap test buttons (tryout only) — fire each trap through the real dispatch path.
   const wireTrap = (id, name)=>{ const b=document.getElementById(id); if(b) b.addEventListener('click', ()=> applyTrapFromItemName(name)); };
@@ -2886,7 +2965,7 @@ function unloadBoard(){
     return false;
   }
 
-  return { start, cancelLoad, isLoaded: ()=> !!STATE.puzzle, hydrateFromSaved: applySavedPathsToBoard, redraw: drawGrid,
+  return { start, cancelLoad, isLoaded: ()=> !!STATE.puzzle, refreshNav: ()=> { if (STATE.meta.level) updatePrevNextButtons(); }, hydrateFromSaved: applySavedPathsToBoard, redraw: drawGrid,
            scramble: trapScramble, fog: trapFog, grayscale: trapGrayscale, shuffleColors: trapShuffleColors,
            solvePipe: solveRandomPipe, skipPuzzle: skipPuzzle, getMeta: ()=>({ ...STATE.meta }) };
 })();
