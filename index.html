@@ -475,6 +475,8 @@ function showView(id){
   const trapCard = document.getElementById('trapTestCard');
   if (trapCard) trapCard.style.display = (id === 'view-player' && tryoutMode) ? '' : 'none';
   if (typeof updateHelperButtons === 'function') updateHelperButtons();
+  // Leaving the puzzle screen mid-build cancels the load.
+  if (id !== 'view-player' && typeof Player !== 'undefined' && Player.cancelLoad) Player.cancelLoad();
   // Scroll to top so the puzzle/view is visible
   window.scrollTo(0, 0);
 }
@@ -827,6 +829,7 @@ function maybeSendDeathLink(){
   if (tryoutMode || !slot_data.death_link) return;
   const meta = (typeof Player !== 'undefined' && Player.getMeta) ? Player.getMeta() : null;
   if (!meta || !meta.level) return;
+  if (!Player.isLoaded()) return; // the board never finished generating — the player never saw it
   const prog = getProgress(currentSlot) || {};
   const done = !!(prog[meta.level] && prog[meta.level][meta.stage]);
   if (done) return; // left an already-completed stage — not a death
@@ -871,7 +874,10 @@ function syncCheckedLocations(){
   let changed = false;
   const markStage = (levelName, s0) => {
     prog[levelName] = prog[levelName] || {};
-    if (!prog[levelName][s0]){ prog[levelName][s0] = { __collected: true }; changed = true; }
+    if (!prog[levelName][s0]){
+      prog[levelName][s0] = { __collected: true }; changed = true;
+      const j = jobForKey(`${levelName}|${s0}`); PuzzleGen.forget(j.seed, j.pairs); // auto-completed: drop its saved board
+    }
   };
   const markRange = (levelName, count) => { for (let s = 0; s < count; s++) markStage(levelName, s); };
   for (let L = 1; L <= nLevels; L++){
@@ -1090,6 +1096,8 @@ function refreshStageTip(locations){
 function attachStageTip(btn, levelNum, stageIdx0, unlocked, done, collected){
   const show = ()=>{
     if (unlocked || done) hoverScout(levelNum, stageIdx0, done);
+    // Hover is the best hint of the next click. Skipped for completed stages, their board was dropped.
+    if (unlocked && !done) PuzzleGen.prefetch([stageParams(`Level ${levelNum}`, stageIdx0, levelNum)], true);
     showStageTip(btn, levelNum, stageIdx0, unlocked, done, collected);
   };
   btn.addEventListener('mouseenter', show);
@@ -1431,12 +1439,66 @@ function getPairsForLevel(levelIndex, cfg){
   const p = Math.round(minP + (maxP - minP) * f);
   return Math.max(minP, Math.min(maxP, p));
 }
+// Seed and size for a stage. Shared with the prefetcher so a prefetched board is the one the player gets.
+function stageParams(levelName, stageIndex, levelIndex){
+  const seeds = slot_data.seeds || {};
+  let seed = '';
+  if (Array.isArray(seeds[levelName]) && seeds[levelName][stageIndex] != null) seed = String(seeds[levelName][stageIndex]);
+  if (!seed) seed = `${currentSlot}:${levelName}:${stageIndex}`;
+  const pairs = Math.max(2, Math.min(20, Number(getPairsForLevel(levelIndex) || 5)));
+  return { seed, pairs };
+}
+function tryoutStageParams(levelName, stageIndex, levelIndex){
+  const pairs = getPairsForLevel(levelIndex, { nLevels: TRYOUT_LEVELS, minP: TRYOUT_MIN_PAIRS, maxP: TRYOUT_MAX_PAIRS, curve: 'linear' });
+  return { seed: `tryout:${levelName}:${stageIndex}`, pairs: Math.max(2, Math.min(20, Number(pairs || 5))) };
+}
+
+// ----- Background pre-generation -----
+// Unlocked, unfinished stages as "Level N|stageIdx0", in menu order.
+function openStageKeys(){
+  const { nLevels, stagesPer } = getLevelInfo();
+  const prog = getProgress(currentSlot) || {};
+  const out = [];
+  for (let L = 1; L <= nLevels; L++){
+    const name = `Level ${L}`;
+    for (let s = 0; s < stagesPer; s++){
+      if (!isStageUnlocked(name, s + 1)) continue;
+      if (prog[name] && prog[name][s]) continue; // solved or auto-completed
+      out.push(`${name}|${s}`);
+    }
+  }
+  return out;
+}
+function jobForKey(k){
+  const [name, s] = k.split('|');
+  const L = Number(name.replace(/\D+/g, ''));
+  return stageParams(name, Number(s), L);
+}
+// Queue every open stage. priorityKeys (stages a just-received item unlocked) go to the front.
+function prefetchOpenStages(priorityKeys){
+  if (tryoutMode || !isConnected || !getLevelInfo().nLevels) return;
+  const open = openStageKeys();
+  const first = new Set(priorityKeys || []);
+  if (first.size) PuzzleGen.prefetch(open.filter(k => first.has(k)).map(jobForKey), true);
+  PuzzleGen.prefetch(open.filter(k => !first.has(k)).map(jobForKey), false);
+}
+// The next stage is the likeliest next click, so it goes first.
+function prefetchNextStage(levelName, stageIndex, levelIndex){
+  const next = stageIndex + 1;
+  if (tryoutMode){
+    if (next < TRYOUT_STAGES) PuzzleGen.prefetch([tryoutStageParams(levelName, next, levelIndex)], true);
+    return;
+  }
+  if (next < getLevelInfo().stagesPer && isStageUnlocked(levelName, next + 1)){
+    PuzzleGen.prefetch([stageParams(levelName, next, levelIndex)], true);
+  }
+}
+
 function startStage(levelName, stageIndex, seeds, levelIndex){
-  let seed=''; if(seeds && seeds[levelName] && Array.isArray(seeds[levelName]) && seeds[levelName][stageIndex]!=null){ seed=String(seeds[levelName][stageIndex]) }
-  if(!seed || seed===''){ seed = `${currentSlot}:${levelName}:${stageIndex}` }
-  const pairs=getPairsForLevel(levelIndex);
+  const { seed, pairs } = stageParams(levelName, stageIndex, levelIndex);
   const cfg = loadConfig(); cfg.lastSeedFor = cfg.lastSeedFor||{}; cfg.lastSeedFor[`${currentSlot}|${levelName}|${stageIndex}`]=seed; saveConfig(cfg);
   Player.start({ seed, pairs, level: levelName, stage: stageIndex, slot: currentSlot });
+  prefetchNextStage(levelName, stageIndex, levelIndex);
   scoutStageReward(levelIndex, stageIndex);
 }
 
@@ -1514,6 +1576,7 @@ WS.onMessage((msgs)=>{
       if (slot_data.death_link) WS.send([{ cmd: 'ConnectUpdate', tags: ['DeathLink'] }]);
       updateHelperButtons();
       renderMenu();
+      prefetchOpenStages(); // starting levels are open immediately — start building their boards
       if (WS.reconnecting){
         // Socket dropped and was re-authenticated: clear the sent-cache and replay every fulfilled
         // check so nothing earned during the outage (or dropped on the dead socket) is lost.
@@ -1545,6 +1608,7 @@ WS.onMessage((msgs)=>{
       }catch{ itemNameToId = {}; locationNameToId = {}; allGameItems = {}; allGameLocations = {}; }
       buildReverseMaps();
       logReceivedItems(PENDING_LOG_ITEMS.splice(0));
+      const openBefore = new Set(openStageKeys());
       if (PENDING_RECEIVED_ITEMS.length){
         processUnlocksForItems(PENDING_RECEIVED_ITEMS.splice(0));
       }
@@ -1552,6 +1616,7 @@ WS.onMessage((msgs)=>{
       syncCheckedLocations(); // location ids are mappable now; mark any already-checked stages done
       renderMenu();
       hintUnlockedPuzzles(); // share hints for every unlocked puzzle now that unlocks + maps are known
+      prefetchOpenStages(openStageKeys().filter(k => !openBefore.has(k))); // just-unlocked boards first
     }
     else if (cmd === 'ReceivedItems'){
       const items = Array.isArray(msg.items) ? msg.items : [];
@@ -1565,12 +1630,14 @@ WS.onMessage((msgs)=>{
       } else {
         logReceivedItems(unlogged);
       }
+      const openBefore = new Set(openStageKeys());
       processUnlocksForItems(items);
       // Queue each item with its absolute stream position so traps fire exactly once.
       for (let j = 0; j < items.length; j++){ PENDING_TRAP_ITEMS.push({ absIdx: startIndex + j, item: items[j] }); }
       maybeFireTraps();
       renderMenu();
       hintUnlockedPuzzles(); // newly-unlocked puzzles get hinted immediately
+      prefetchOpenStages(openStageKeys().filter(k => !openBefore.has(k))); // build just-unlocked boards first
     }
     else if(cmd==='Retrieved'){
       const results = msg.keys || {}; const keyName = `FlowFree_${currentSlot}_completed_levels`;
@@ -1579,6 +1646,7 @@ WS.onMessage((msgs)=>{
         syncCheckedLocations(); // merge any already-checked (solved-elsewhere / collected) stages
         renderMenu();
         try { Player.hydrateFromSaved && Player.hydrateFromSaved(); } catch {}
+        prefetchOpenStages();
       }
       const cKey = consumablesKey || `FlowFree_${currentSlot}_consumables`;
       if(Object.prototype.hasOwnProperty.call(results, cKey)){
@@ -1645,12 +1713,12 @@ function doConnect(){
 }
 function doResync(){ requestSavedProgress(); renderMenu(); updateStatus('Resync requested'); SENT_LOCATION_IDS.clear(); resendAllFulfilledChecks(); }
 
-function doDisconnect(){ try{ WS.close(); }catch{} isConnected=false; document.getElementById('menu').style.display='none'; document.getElementById('loginGrid').style.display='grid'; updateStatus('Disconnected'); }
+function doDisconnect(){ try{ WS.close(); }catch{} isConnected=false; PuzzleGen.clearQueue(); document.getElementById('menu').style.display='none'; document.getElementById('loginGrid').style.display='grid'; updateStatus('Disconnected'); }
 
 document.getElementById('btnConnect').addEventListener('click', doConnect);
 document.getElementById('btnResync').addEventListener('click', doResync);
 document.getElementById('btnDisconnect').addEventListener('click', doDisconnect);
-document.getElementById('btnClear').addEventListener('click', ()=>{ lsRemove(CFG_KEY); updateStatus('Cleared saved config'); });
+document.getElementById('btnClear').addEventListener('click', ()=>{ lsRemove(CFG_KEY); PuzzleGen.clearAll(); updateStatus('Cleared saved config and saved puzzle boards'); });
 document.getElementById('btnBack').addEventListener('click', ()=>{
   maybeSendDeathLink();
   if (tryoutMode){ showView('view-tryout'); renderTryoutMenu(); }
@@ -1691,6 +1759,7 @@ function renderTryoutMenu(){
       btn.textContent = `Stage ${s + 1}`;
       if (tryoutProgress[name] && tryoutProgress[name][s]) btn.classList.add('done');
       btn.addEventListener('click', ()=> startTryoutStage(name, s, i));
+      btn.addEventListener('mouseenter', ()=> PuzzleGen.prefetch([tryoutStageParams(name, s, i)], true));
       row.appendChild(btn);
     }
     lvlDiv.appendChild(row);
@@ -1700,9 +1769,9 @@ function renderTryoutMenu(){
 
 function startTryoutStage(levelName, stageIndex, levelIndex){
   tryoutMode = true;
-  const seed = `tryout:${levelName}:${stageIndex}`;
-  const pairs = getPairsForLevel(levelIndex, { nLevels: TRYOUT_LEVELS, minP: TRYOUT_MIN_PAIRS, maxP: TRYOUT_MAX_PAIRS, curve: 'linear' });
+  const { seed, pairs } = tryoutStageParams(levelName, stageIndex, levelIndex);
   Player.start({ seed, pairs, level: levelName, stage: stageIndex, slot: '_tryout' });
+  prefetchNextStage(levelName, stageIndex, levelIndex);
   renderStageReward(levelIndex, stageIndex);   // shows the "connect to see rewards" note in tryout
 }
 
@@ -1717,10 +1786,13 @@ document.getElementById('btnTryoutBack').addEventListener('click', ()=>{
 });
 
 /********************************
-* ===== PLAYER IMPLEMENTATION =====
-********************************/
-const Player = (()=>{
-// Utilities & RNG (Used by generator)
+ * Puzzle generator
+ ********************************/
+// Must stay self-contained: the worker gets this function's source via toString(), so nothing in here
+// can reference outer names. Returns generate_puzzle({seed, pairs}).
+function PUZZLE_GENERATOR(){
+"use strict";
+// Utilities & RNG
 function mulberry32(a){return function(){let t=a+=0x6D2B79F5; t=Math.imul(t ^ t>>>15, t | 1); t^=t+Math.imul(t ^ t>>>7, t | 61); return ((t ^ t>>>14)>>>0)/4294967296}}
 function hashStringToSeed(str){ let h=2166136261>>>0; for(let i=0;i<str.length;i++){h^=str.charCodeAt(i); h=Math.imul(h,16777619)} return h>>>0 }
 function parseSeedInput(v){ if(v==null || v===''){ return {seedInt: Math.floor(Math.random()*1e9)>>>0, source:''} } const s=String(v).trim(); if(/^[-]?\d+$/.test(s)){ let n=Number(s); n=(n>>>0); return {seedInt:n, source:s} } return {seedInt: hashStringToSeed(s), source:s} }
@@ -1729,25 +1801,6 @@ function randint(lo, hi, rand){ return lo + Math.floor(rand()*(hi-lo+1)) }
 
 let RNG = null;
 
-// ----- Trap visual state (Color Shuffle / Grayscale / Fog) -----
-let COLOR_OVERRIDE = null, COLOR_OVERRIDE_UNTIL = 0;
-let GRAY_UNTIL = 0, FOG_UNTIL = 0, TRAP_REDRAW_TIMER = null;
-function toGray(hex){
-  if (typeof hex !== 'string' || hex[0] !== '#' || hex.length < 7) return '#888888';
-  const n = parseInt(hex.slice(1, 7), 16);
-  const r = (n>>16)&255, g = (n>>8)&255, b = n&255;
-  const y = Math.round(0.299*r + 0.587*g + 0.114*b);
-  const h = y.toString(16).padStart(2, '0');
-  return '#' + h + h + h;
-}
-function getColorMapping(){
-  const now = Date.now();
-  let map = (COLOR_OVERRIDE && now < COLOR_OVERRIDE_UNTIL) ? COLOR_OVERRIDE : currentTheme.colorMapping;
-  if (now < GRAY_UNTIL){
-    const out = {}; for (const k in map) out[k] = toGray(map[k]); return out;
-  }
-  return map;
-}
 const LETTERS=("0123456789".slice(1)+"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ").split("");
 
 const T=0, L=1, R=2; function sign(x){return x===0?0:(x<0?-1:1)}
@@ -1808,9 +1861,9 @@ function generate_puzzle(opts, _depth){
   function color_tubes(grid){ const tmp=grid.make_tubes(); const tube_grid=tmp[0], uf=tmp[1]; const char=new Map(); const letters=LETTERS;
     const getChar=(root)=>{ if(!char.has(root)){ char.set(root, letters[char.size]) } return char.get(root) };
     for(let x=0;x<tube_grid.w;x++){ for(let y=0;y<tube_grid.h;y++){ if(tube_grid.get(x,y)==='x'){ const r=uf.find([x,y]); tube_grid.set(x,y, getChar(r)) } } }
-    return [tube_grid, char]
+    return [tube_grid, char, uf]
   }
-  const cg=color_tubes(grid_obj), color_grid=cg[0];
+  const cg=color_tubes(grid_obj), color_grid=cg[0], rootChar=cg[1], tubeUf=cg[2];
   const puzzle_grid=[], start_points={};
   for(let y=0;y<color_grid.h;y++){
     const row=[];
@@ -1825,9 +1878,211 @@ function generate_puzzle(opts, _depth){
     puzzle_grid.push(row)
   }
   const cleaned={}; for(const k in start_points){ if(Object.prototype.hasOwnProperty.call(start_points,k)) cleaned[String(k)]=start_points[k] }
-  return { grid: puzzle_grid, start_points: cleaned, rows: color_grid.h, cols: color_grid.w, grid_obj, seed: seedInt }
+  // Per-cell solution colours for the helpers. Plain arrays so the result can be posted from a worker.
+  const solution=[];
+  for(let y=0;y<color_grid.h;y++){ const row=[]; for(let x=0;x<color_grid.w;x++){ row.push(rootChar.get(tubeUf.find([x,y]))) } solution.push(row) }
+  return { grid: puzzle_grid, start_points: cleaned, rows: color_grid.h, cols: color_grid.w, seed: seedInt, solution }
 }
 
+return generate_puzzle;
+}
+
+/********************************
+ * Background puzzle generation (Web Workers + cache)
+ ********************************/
+// Boards are deterministic per (seed, pairs), so they cache safely. 'fg' builds the board being opened
+// so it never waits on background work. 'bg' runs the prefetch queue: next stage, newly unlocked stages,
+// then the rest. Without workers, opening a stage builds on the main thread and prefetch only loads
+// saved boards.
+// Saved boards (IndexedDB) so big boards open instantly after a reload. Cleanup: deleted once the stage
+// is solved or collected, expired after BOARD_TTL_DAYS unused, capped at BOARD_STORE_MAX (LRU).
+// "Clear saved config" wipes it. Without IndexedDB everything still works in memory.
+const BoardStore = (()=>{
+  const DB_NAME = 'apflowfree-boards', OS = 'boards';
+  const BOARD_TTL_DAYS = 14, BOARD_STORE_MAX = 400;
+  const TTL_MS = BOARD_TTL_DAYS * 24 * 3600 * 1000;
+  let dbp = null;
+  function open(){
+    if (!dbp) dbp = new Promise(resolve => {
+      try {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = ()=>{ req.result.createObjectStore(OS, { keyPath: 'k' }).createIndex('t', 't'); };
+        req.onsuccess = ()=> resolve(req.result);
+        req.onerror = req.onblocked = ()=> resolve(null);
+      } catch { resolve(null); }
+    });
+    return dbp;
+  }
+  // Resolves with fn's return value after the transaction commits, null on failure.
+  async function tx(mode, fn){
+    const db = await open(); if (!db) return null;
+    return new Promise(resolve => {
+      try {
+        const t = db.transaction(OS, mode); const out = fn(t.objectStore(OS));
+        t.oncomplete = ()=> resolve(out); t.onerror = t.onabort = ()=> resolve(null);
+      } catch { resolve(null); }
+    });
+  }
+  return {
+    // A hit refreshes last-used so boards in use never expire.
+    async get(k){
+      const box = {};
+      await tx('readwrite', os => { const r = os.get(k); r.onsuccess = ()=>{ const v = r.result;
+        if (v && v.t > Date.now() - TTL_MS){ box.p = v.p; v.t = Date.now(); os.put(v); } }; return box; });
+      return box.p || null;
+    },
+    put(k, p){ return tx('readwrite', os => { os.put({ k, p, t: Date.now() }); }); },
+    del(k){ return tx('readwrite', os => { os.delete(k); }); },
+    clear(){ return tx('readwrite', os => { os.clear(); }); },
+    // Expired first, then LRU beyond the cap (two transactions so the count is accurate).
+    async prune(){
+      await tx('readwrite', os => {
+        os.index('t').openCursor(IDBKeyRange.upperBound(Date.now() - TTL_MS)).onsuccess = (e)=>{ const c = e.target.result; if (c){ c.delete(); c.continue(); } };
+      });
+      await tx('readwrite', os => {
+        os.count().onsuccess = (e)=>{
+          let extra = e.target.result - BOARD_STORE_MAX; if (extra <= 0) return;
+          os.index('t').openCursor().onsuccess = (ev)=>{ const c = ev.target.result; if (c && extra-- > 0){ c.delete(); c.continue(); } };
+        };
+      });
+    },
+    count(){ return tx('readonly', os => { const box = {}; os.count().onsuccess = (e)=>{ box.n = e.target.result; }; return box; }).then(b => b ? b.n : null); },
+  };
+})();
+
+const PuzzleGen = (()=>{
+  const CACHE_MAX = 600;
+  const cache = new Map();     // key -> puzzle (plain data; never mutated by the player)
+  const inflight = new Map();  // key -> Promise<puzzle>
+  let queue = [];              // background jobs [{seed, pairs}], highest priority first
+  let bgBusy = false;
+  let fg = null, bg = null, syncGen = null, workersBroken = false;
+  let epoch = 0;               // bumped by clearAll() so in-flight builds don't repopulate
+  const keyOf = (seed, pairs) => pairs + '|' + seed;
+
+  function spawn(){
+    if (workersBroken) return null;
+    try {
+      const src = 'const generate_puzzle = (' + PUZZLE_GENERATOR.toString() + ')();\n'
+        + 'self.onmessage = (e)=>{ const d = e.data;\n'
+        + '  try { self.postMessage({ id: d.id, puzzle: generate_puzzle({ seed: d.seed, pairs: d.pairs }) }); }\n'
+        + '  catch (err) { self.postMessage({ id: d.id, error: String((err && err.message) || err) }); } };';
+      const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      const pending = new Map(); let nextId = 1;
+      const h = {
+        dead: false,
+        run(seed, pairs){
+          return new Promise((resolve, reject)=>{ const id = nextId++; pending.set(id, { resolve, reject }); w.postMessage({ id, seed, pairs }); });
+        }
+      };
+      w.onmessage = (e)=>{
+        const job = pending.get(e.data.id); if (!job) return; pending.delete(e.data.id);
+        if (e.data.error) job.reject(new Error(e.data.error)); else job.resolve(e.data.puzzle);
+      };
+      // A worker that fails to start (e.g. blocked origin) disables workers for the session.
+      w.onerror = (e)=>{
+        if (e && e.preventDefault) e.preventDefault();
+        h.dead = true; workersBroken = true;
+        for (const job of pending.values()) job.reject(new Error('worker unavailable'));
+        pending.clear();
+      };
+      return h;
+    } catch { workersBroken = true; return null; }
+  }
+  const fgWorker = ()=> (fg && !fg.dead) ? fg : (fg = spawn());
+  const bgWorker = ()=> (bg && !bg.dead) ? bg : (bg = spawn());
+
+  function generateSync(seed, pairs){
+    if (!syncGen) syncGen = PUZZLE_GENERATOR();
+    return syncGen({ seed, pairs });
+  }
+  function remember(k, puzzle){
+    cache.delete(k); cache.set(k, puzzle);
+    if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
+  }
+  // Start or join a build. allowSync: fall back to the main thread without a worker.
+  function build(seed, pairs, worker, allowSync){
+    const k = keyOf(seed, pairs);
+    if (cache.has(k)) return Promise.resolve(cache.get(k));
+    if (inflight.has(k)) return inflight.get(k);
+    let generate = null;
+    if (worker) generate = ()=> worker.run(seed, pairs).catch(err => { if (!allowSync) throw err; return generateSync(seed, pairs); });
+    else if (allowSync) generate = ()=> new Promise(res => setTimeout(()=> res(generateSync(seed, pairs)), 0)); // let the spinner paint first
+    // Saved board first, otherwise build and save it.
+    const ep = epoch;
+    const p = BoardStore.get(k)
+      .then(saved => {
+        if (saved) return saved;
+        if (!generate) throw new Error('no worker');
+        return generate().then(puz => { if (ep === epoch) BoardStore.put(k, puz); return puz; });
+      })
+      .then(puz => { if (ep === epoch) remember(k, puz); inflight.delete(k); return puz; },
+            err => { inflight.delete(k); throw err; });
+    inflight.set(k, p);
+    return p;
+  }
+  function pump(){
+    if (bgBusy) return;
+    while (queue.length && (cache.has(keyOf(queue[0].seed, queue[0].pairs)) || inflight.has(keyOf(queue[0].seed, queue[0].pairs)))) queue.shift();
+    if (!queue.length) return;
+    // No worker: saved boards still load, nothing gets built (it would freeze the page).
+    const w = bgWorker();
+    const job = queue.shift();
+    bgBusy = true;
+    build(job.seed, job.pairs, w, false).catch(()=>{}).finally(()=>{ bgBusy = false; pump(); });
+  }
+
+  return {
+    // Sync lookup, a hit shows instantly.
+    peek(seed, pairs){ return cache.get(keyOf(seed, pairs)) || null; },
+    // Board being opened: memory, in-flight job, saved board, fg worker, then main thread.
+    get(seed, pairs){
+      const k = keyOf(seed, pairs);
+      queue = queue.filter(j => keyOf(j.seed, j.pairs) !== k);
+      return build(seed, pairs, fgWorker(), true);
+    },
+    // front=true jumps the queue.
+    prefetch(jobs, front){
+      const fresh = (jobs || []).filter(j => j && !cache.has(keyOf(j.seed, j.pairs)) && !inflight.has(keyOf(j.seed, j.pairs)));
+      if (!fresh.length) return;
+      const ks = new Set(fresh.map(j => keyOf(j.seed, j.pairs)));
+      if (front) queue = fresh.concat(queue.filter(j => !ks.has(keyOf(j.seed, j.pairs))));
+      else { const have = new Set(queue.map(j => keyOf(j.seed, j.pairs))); queue = queue.concat(fresh.filter(j => !have.has(keyOf(j.seed, j.pairs)))); }
+      pump();
+    },
+    clearQueue(){ queue = []; },
+    // Solved or collected: drop the saved copy, keep the in-memory one for this session.
+    forget(seed, pairs){ BoardStore.del(keyOf(seed, pairs)); },
+    clearAll(){ epoch++; queue = []; cache.clear(); inflight.clear(); return BoardStore.clear(); },
+    stats(){ return { cached: cache.size, queued: queue.length, inflight: inflight.size, bgBusy, workers: !workersBroken }; },
+  };
+})();
+// Prune saved boards shortly after load.
+setTimeout(()=> BoardStore.prune(), 3000);
+
+/********************************
+* ===== PLAYER IMPLEMENTATION =====
+********************************/
+const Player = (()=>{
+// ----- Trap visual state (Color Shuffle / Grayscale / Fog) -----
+let COLOR_OVERRIDE = null, COLOR_OVERRIDE_UNTIL = 0;
+let GRAY_UNTIL = 0, FOG_UNTIL = 0, TRAP_REDRAW_TIMER = null;
+function toGray(hex){
+  if (typeof hex !== 'string' || hex[0] !== '#' || hex.length < 7) return '#888888';
+  const n = parseInt(hex.slice(1, 7), 16);
+  const r = (n>>16)&255, g = (n>>8)&255, b = n&255;
+  const y = Math.round(0.299*r + 0.587*g + 0.114*b);
+  const h = y.toString(16).padStart(2, '0');
+  return '#' + h + h + h;
+}
+function getColorMapping(){
+  const now = Date.now();
+  let map = (COLOR_OVERRIDE && now < COLOR_OVERRIDE_UNTIL) ? COLOR_OVERRIDE : currentTheme.colorMapping;
+  if (now < GRAY_UNTIL){
+    const out = {}; for (const k in map) out[k] = toGray(map[k]); return out;
+  }
+  return map;
+}
 // Canvas + state
 let CELL=56; const BOARD_PAD=8;
 const canvas=document.getElementById('board'); const ctx=canvas.getContext('2d');
@@ -2332,6 +2587,7 @@ function checkWin() {
       prog[STATE.meta.level][STATE.meta.stage] = STATE.paths || {};
       setProgress(STATE.meta.slot, prog);
       pushSavedProgressToServer([STATE.meta.level]);
+      PuzzleGen.forget(STATE.meta.seed, STATE.meta.pairs); // solved: no need to keep its board on disk
 
       const toSend = locationsToSendAfterStage(STATE.meta.level, STATE.meta.stage);
       if (toSend.length) {
@@ -2435,25 +2691,38 @@ function applyPuzzle(p){
   applySavedPathsToBoard();
 }
 
+// Blank the board while the next one builds, so the old puzzle can't be won under the new stage's meta.
+function unloadBoard(){
+  clearConfettiCanvas();
+  if (BANNER_TIMEOUT){ clearTimeout(BANNER_TIMEOUT); BANNER_TIMEOUT = null; }
+  document.getElementById('winBanner').classList.remove('show');
+  STATE.puzzle = null; STATE.paths = {}; STATE.gridState = [];
+  STATE.active = null; STATE.current = []; STATE.hasReachedEnd = false; ACTIVE_BASELINE = null;
+  ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,canvas.width,canvas.height); ctx.restore();
+  document.getElementById('serverInfo').textContent = `${STATE.meta.level || '—'} • Stage ${Number(STATE.meta.stage)+1} • Generating…`;
+  updatePrevNextButtons();
+}
+
   // Public API
+  let LOAD_TOKEN = 0; // bumped on start/cancel so a slow build can't land on a stage the player left
   function start({seed, pairs, level, stage, slot}){
     STATE.meta.level=level||''; STATE.meta.stage=Number(stage||0); STATE.meta.slot=slot||'';
     STATE.meta.pairs = Math.max(2, Math.min(20, Number(pairs||5))); STATE.meta.seed = seed || '';
     showView('view-player');
-    // Small boards generate instantly — render synchronously, no spinner flash (default games top
-    // out at 12 pairs, so they're unaffected). Big boards (raised MaxPairs) can freeze for seconds,
-    // so show a spinner and defer the work a tick so it paints first. setTimeout, not rAF — rAF is
-    // paused on hidden tabs and would leave the spinner stuck if the player switched tabs mid-load.
-    if (STATE.meta.pairs >= 13 && typeof showLoading === 'function'){
-      showLoading('Generating puzzle…');
-      setTimeout(()=>{
-        try { const p=generate_puzzle({pairs:STATE.meta.pairs, seed}); applyPuzzle(p); }
-        finally { if (typeof hideLoading === 'function') hideLoading(); }
-      }, 30);
-    } else {
-      const p=generate_puzzle({pairs:STATE.meta.pairs, seed}); applyPuzzle(p);
-    }
+    const token = ++LOAD_TOKEN;
+    // Already built: show it now.
+    const cached = PuzzleGen.peek(STATE.meta.seed, STATE.meta.pairs);
+    if (cached){ applyPuzzle(cached); return; }
+    // Spinner is delayed so fast builds don't flash it.
+    unloadBoard();
+    const spinner = setTimeout(()=>{ if (token === LOAD_TOKEN) showLoading('Generating puzzle…'); }, 150);
+    PuzzleGen.get(STATE.meta.seed, STATE.meta.pairs)
+      .then(p => { if (token === LOAD_TOKEN) applyPuzzle(p); },
+            err => { if (token === LOAD_TOKEN) playerLog('Could not generate this puzzle: ' + escapeHTML(err.message)); })
+      .finally(()=>{ clearTimeout(spinner); if (token === LOAD_TOKEN) hideLoading(); });
   }
+  // Leaving the player view mid-build: drop the pending load and its spinner.
+  function cancelLoad(){ LOAD_TOKEN++; hideLoading(); }
 
   // Player buttons
   function resetBoard(){
@@ -2527,22 +2796,9 @@ function applyPuzzle(p){
   }
 
   // ----- Consumable helper effects (Solve Random Pipe / Skip Puzzle) -----
-  // Reconstruct the generator's own solution as a per-cell colour grid from the solved grid_obj that
-  // generate_puzzle returns. Letters are assigned in the same order as color_tubes so they match the
-  // endpoint colours in start_points. Cached on the puzzle.
+  // Per-cell solution colours, built by generate_puzzle.
   function getSolutionGrid(){
-    if (!STATE.puzzle) return null;
-    if (STATE.puzzle._solCache) return STATE.puzzle._solCache;
-    const go = STATE.puzzle.grid_obj;
-    if (!go || typeof go.make_tubes !== 'function') return null;
-    const mt = go.make_tubes(); const tg = mt[0], uf = mt[1];
-    const char = new Map();
-    const getChar = (root)=>{ if(!char.has(root)) char.set(root, LETTERS[char.size]); return char.get(root); };
-    for (let x=0; x<tg.w; x++) for (let y=0; y<tg.h; y++) if (tg.get(x,y)==='x') getChar(uf.find([x,y]));
-    const rows = STATE.puzzle.rows, cols = STATE.puzzle.cols, sol = [];
-    for (let y=0;y<rows;y++){ const r=[]; for(let x=0;x<cols;x++){ r.push(getChar(uf.find([x,y]))); } sol.push(r); }
-    STATE.puzzle._solCache = sol;
-    return sol;
+    return (STATE.puzzle && STATE.puzzle.solution) || null;
   }
   function isColorSolved(color){
     const eps = STATE.puzzle.start_points[color] || [];
@@ -2630,7 +2886,7 @@ function applyPuzzle(p){
     return false;
   }
 
-  return { start, hydrateFromSaved: applySavedPathsToBoard, redraw: drawGrid,
+  return { start, cancelLoad, isLoaded: ()=> !!STATE.puzzle, hydrateFromSaved: applySavedPathsToBoard, redraw: drawGrid,
            scramble: trapScramble, fog: trapFog, grayscale: trapGrayscale, shuffleColors: trapShuffleColors,
            solvePipe: solveRandomPipe, skipPuzzle: skipPuzzle, getMeta: ()=>({ ...STATE.meta }) };
 })();
