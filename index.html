@@ -134,6 +134,9 @@
     .goal-bar .goal-count{ font-weight:700; background:var(--pill-bg); border:1px solid var(--border-subtle); border-radius:999px; padding:2px 8px }
     .goal-bar .goal-count.met{ color:var(--stage-done-color); background:var(--stage-done-bg); border-color:var(--stage-done-border) }
     .goal-bar .goal-met{ color:var(--stage-done-color); font-weight:700 }
+    /* Co-op presence: other clients connected to this slot. */
+    .coop-presence{ color:var(--accent); font-weight:600 }
+    #coopPresence{ margin-top:4px }
     .stage-row{ display:flex; flex-wrap:wrap; gap:8px }
     .stage{ padding:8px 10px; border:1px solid var(--stage-locked-border); background:var(--stage-locked-bg); color:var(--stage-locked-color); border-radius:10px; cursor:default }
     .stage[disabled]{ cursor:not-allowed }
@@ -290,7 +293,7 @@
 
       <div id="menu" style="display:none">
         <div class="row" style="align-items:center; justify-content:space-between">
-          <div class="small" id="menuInfo">—</div>
+          <div class="small"><span id="menuInfo">—</span> <span class="coop-presence" id="coopHub" hidden></span></div>
           <div class="row">
             <button class="btn" id="btnResync">Resync</button>
             <button class="btn" id="btnDisconnect">Disconnect</button>
@@ -349,6 +352,7 @@
           <div class="card">
             <h3>From server</h3>
             <div class="small" id="serverInfo">Loading…</div>
+            <div class="small coop-presence" id="coopPresence" hidden></div>
             <div class="row" style="margin-top:8px; flex-wrap:wrap; gap:8px">
   			  <button class="btn" id="prevBtn">Previous puzzle</button>
   			  <button class="btn" id="nextBtn">Next puzzle</button>
@@ -637,6 +641,20 @@ const TRAP_DURATIONS = { fog: 12000, shuffle: 12000, gray: 15000 };
 function recomputeCharges(){
   SOLVE_CHARGES = Math.max(0, SOLVE_RECEIVED - SOLVE_USED);
   SKIP_CHARGES = Math.max(0, SKIP_RECEIVED - SKIP_USED);
+}
+function progressKey(){ return `FlowFree_${currentSlot}_completed_levels`; }
+function usedKey(kind){ return `FlowFree_${currentSlot}_${kind}_used`; }
+function spendHelper(kind){
+  const before = kind === 'solve' ? SOLVE_USED : SKIP_USED;
+  if (kind === 'solve') SOLVE_USED++; else SKIP_USED++;
+  recomputeCharges(); persistConsumables(); updateHelperButtons();
+  WS.send([{ cmd:'Set', key: usedKey(kind), default: 0, want_reply: false,
+             operations: [{ operation:'max', value: before }, { operation:'add', value: 1 }] }]);
+}
+function applyUsedCount(kind, v){
+  const n = Number(v) || 0;
+  if (kind === 'solve') SOLVE_USED = Math.max(SOLVE_USED, n); else SKIP_USED = Math.max(SKIP_USED, n);
+  recomputeCharges(); updateHelperButtons();
 }
 function persistConsumables(){
   if (!consumablesKey) return;
@@ -1153,7 +1171,7 @@ function updateStatus(txt, warn=false){ const el=document.getElementById('status
 function requestSavedProgress(){
   const progKey = `FlowFree_${currentSlot}_completed_levels`;
   consumablesKey = `FlowFree_${currentSlot}_consumables`;   // AP data storage; the server scopes it to this room
-  WS.send([{cmd:'Get', keys:[progKey, consumablesKey]}]);
+  WS.send([{cmd:'Get', keys:[progKey, consumablesKey, usedKey('solve'), usedKey('skip')]}]);
 }
 // 'update' per level instead of replacing the blob, so another device saving a different level isn't clobbered.
 function pushSavedProgressToServer(levelNames){
@@ -1182,6 +1200,77 @@ function mergeServerProgress(server){
   setProgress(currentSlot, merged);
   if (pushBack.length) pushSavedProgressToServer(pushBack);
 }
+
+/********************************
+ * Co-op: every client connected to this slot shares the puzzle it's on
+ ********************************/
+// Finished lines live in a data storage key per stage (FlowFree_<slot>_wip_<level>_<stage>), one entry
+// per colour: { p: path ([] = cleared), s: stamp, c: client id }. Everyone on the stage SetNotifies that
+// key and resolves it the same way (newest stamp wins an overlap), so all boards converge. It also means
+// an unfinished board survives reloads and device switches. Lines still being dragged, and presence,
+// go over Bounce to our own slot and are never stored.
+const COOP_CID = Math.random().toString(36).slice(2, 10); // this tab
+const COOP_PARTNER_TTL = 12000;
+let coopClock = 0;           // Lamport-style: always ahead of every stamp seen, so our newest line wins
+let coopWatched = new Set(); // keys SetNotify'd on this connection
+const COOP_PARTNERS = new Map(); // cid -> { key, level, stage, at }
+
+function coopStamp(){ coopClock = Math.max(coopClock + 1, Date.now()); return coopClock; }
+function coopSaw(stamp){ const s = Number(stamp) || 0; if (s > coopClock) coopClock = s; }
+function coopEnabled(){ return !tryoutMode && isConnected && !!currentSlot && mySlotNumber != null && WS.isOpen(); }
+function coopKeyPrefix(){ return `FlowFree_${currentSlot}_wip_`; }
+function wipKey(levelName, stageIdx){ return coopKeyPrefix() + String(levelName).replace(/\D+/g, '') + '_' + Number(stageIdx); }
+
+// Subscribe once per connection, and always fetch the current value.
+function coopWatch(key){
+  if (!key || !coopEnabled()) return;
+  if (!coopWatched.has(key)){ coopWatched.add(key); WS.send([{ cmd:'SetNotify', keys:[key] }]); }
+  WS.send([{ cmd:'Get', keys:[key] }]);
+}
+function coopWrite(key, entries){
+  if (!key || !coopEnabled() || !Object.keys(entries).length) return;
+  WS.send([{ cmd:'Set', key, default:{}, want_reply:false, operations:[{ operation:'update', value: entries }] }]);
+}
+function coopBounce(data){
+  if (!coopEnabled()) return;
+  WS.send([{ cmd:'Bounce', slots:[Number(mySlotNumber)], data: Object.assign({ coop: 1, cid: COOP_CID }, data) }]);
+}
+
+// Presence: a heartbeat with where we are, answered right away when a new partner shows up.
+function coopCurrentKey(){ return (typeof Player !== 'undefined' && Player.coopKey) ? Player.coopKey() : null; }
+function coopAnnounce(){
+  const key = coopCurrentKey(), meta = key ? Player.getMeta() : null;
+  coopBounce({ t: 'here', key, level: meta ? meta.level : null, stage: meta ? meta.stage : null });
+}
+function coopOnPresence(d){
+  const isNew = !COOP_PARTNERS.has(d.cid);
+  if (d.t === 'bye') COOP_PARTNERS.delete(d.cid);
+  else COOP_PARTNERS.set(d.cid, { key: typeof d.key === 'string' ? d.key : null,
+                                  level: typeof d.level === 'string' ? d.level : null,
+                                  stage: Number.isInteger(d.stage) ? d.stage : null, at: Date.now() });
+  if (isNew && d.t === 'here') coopAnnounce();
+  renderCoopPresence();
+}
+function renderCoopPresence(){
+  const now = Date.now();
+  for (const [cid, p] of COOP_PARTNERS) if (now - p.at > COOP_PARTNER_TTL) COOP_PARTNERS.delete(cid);
+  const all = [...COOP_PARTNERS.values()];
+  const here = coopCurrentKey();
+  const withMe = all.filter(p => here && p.key === here).length;
+  const elsewhere = all.filter(p => !(here && p.key === here));
+  const plural = n => n === 1 ? 'partner' : 'partners';
+  const hub = document.getElementById('coopHub'), card = document.getElementById('coopPresence');
+  if (hub){ hub.hidden = !all.length || !isConnected; hub.textContent = `· 👥 ${all.length} ${plural(all.length)} online`; }
+  if (card){
+    const parts = [];
+    if (withMe) parts.push(`${withMe} ${plural(withMe)} on this puzzle`);
+    for (const p of elsewhere.slice(0, 3)) parts.push(p.level != null ? `partner on ${p.level}, Stage ${p.stage + 1}` : 'partner in the menu');
+    card.hidden = tryoutMode || !parts.length;
+    card.textContent = '👥 ' + parts.join(' · ');
+  }
+}
+setInterval(()=>{ if (coopEnabled()) coopAnnounce(); renderCoopPresence(); }, 5000);
+window.addEventListener('pagehide', ()=>{ try { coopBounce({ t: 'bye' }); } catch {} });
 
 function getLevelInfo(){
   const nLevels = Number(slot_data.number_of_levels || 10);
@@ -1620,6 +1709,11 @@ WS.onMessage((msgs)=>{
       HINT_SCOUTED = new Set(); // re-send unlocked-puzzle hints fresh for this connection
       checkedLocations = new Set((msg.checked_locations || []).map(Number)); // already-checked (solved or collected)
       goalReported = false; // re-evaluate/report the goal fresh for this connection
+      // Co-op: partners' solves and helper spends show up live; a reconnect rejoins the open puzzle.
+      coopWatched = new Set();
+      WS.send([{ cmd:'SetNotify', keys:[progressKey(), consumablesKey, usedKey('solve'), usedKey('skip')] }]);
+      try { Player.coopRejoin(); } catch {}
+      coopAnnounce();
       // DeathLink: advertise the tag now that slot_data is known (Connect is sent before slot_data).
       if (slot_data.death_link) WS.send([{ cmd: 'ConnectUpdate', tags: ['DeathLink'] }]);
       updateHelperButtons();
@@ -1696,6 +1790,11 @@ WS.onMessage((msgs)=>{
         try { Player.hydrateFromSaved && Player.hydrateFromSaved(); } catch {}
         prefetchOpenStages();
       }
+      for (const k of Object.keys(results)){
+        if (k.startsWith(coopKeyPrefix())) Player.coopMerge(k, results[k]);
+        else if (k === usedKey('solve')) applyUsedCount('solve', results[k]);
+        else if (k === usedKey('skip')) applyUsedCount('skip', results[k]);
+      }
       const cKey = consumablesKey || `FlowFree_${currentSlot}_consumables`;
       if(Object.prototype.hasOwnProperty.call(results, cKey)){
         const c = results[cKey] || {};
@@ -1708,6 +1807,22 @@ WS.onMessage((msgs)=>{
         recomputeCharges();
         maybeFireTraps();   // process any items that arrived before the state loaded
         updateHelperButtons();
+      }
+    }
+    else if (cmd === 'SetReply'){
+      const k = String(msg.key || '');
+      if (k.startsWith(coopKeyPrefix())) Player.coopMerge(k, msg.value);
+      else if (k === progressKey()){
+        mergeServerProgress(msg.value || {});
+        renderMenu();
+        maybeSendGoalIfMet();
+      }
+      else if (k === usedKey('solve')) applyUsedCount('solve', msg.value);
+      else if (k === usedKey('skip')) applyUsedCount('skip', msg.value);
+      else if (k === consumablesKey){
+        const c = msg.value || {};
+        TRAP_HWM = Math.max(TRAP_HWM, Number(c.hwm) || 0);
+        applyUsedCount('solve', c.solveUsed); applyUsedCount('skip', c.skipUsed);
       }
     }
     else if (cmd === 'PrintJSON' && msg.type === 'ItemSend'){
@@ -1728,6 +1843,13 @@ WS.onMessage((msgs)=>{
       }
     }
     else if(cmd==='Bounced'){
+      const d = msg.data || {};
+      if (d.coop === 1){
+        if (typeof d.cid === 'string' && d.cid !== COOP_CID && !tryoutMode){
+          if (d.t === 'here' || d.t === 'bye') coopOnPresence(d); else Player.coopRemote(d);
+        }
+        continue;
+      }
       // DeathLink: someone else died -> clear our current board (no progress lost). Ignore our own.
       const tags = msg.tags || [];
       if (tags.includes('DeathLink')){
@@ -1761,7 +1883,7 @@ function doConnect(){
 }
 function doResync(){ requestSavedProgress(); renderMenu(); updateStatus('Resync requested'); SENT_LOCATION_IDS.clear(); resendAllFulfilledChecks(); }
 
-function doDisconnect(){ try{ WS.close(); }catch{} isConnected=false; PuzzleGen.clearQueue(); document.getElementById('menu').style.display='none'; document.getElementById('loginGrid').style.display='grid'; updateStatus('Disconnected'); }
+function doDisconnect(){ try{ coopBounce({ t: 'bye' }); }catch{} try{ WS.close(); }catch{} isConnected=false; PuzzleGen.clearQueue(); COOP_PARTNERS.clear(); renderCoopPresence(); document.getElementById('menu').style.display='none'; document.getElementById('loginGrid').style.display='grid'; updateStatus('Disconnected'); }
 
 document.getElementById('btnConnect').addEventListener('click', doConnect);
 document.getElementById('btnResync').addEventListener('click', doResync);
@@ -1775,11 +1897,11 @@ document.getElementById('btnBack').addEventListener('click', ()=>{
 // Helper (consumable) spend buttons.
 document.getElementById('solvePipeBtn').addEventListener('click', ()=>{
   if (SOLVE_CHARGES <= 0) return;
-  if (Player.solvePipe && Player.solvePipe()){ SOLVE_USED++; recomputeCharges(); persistConsumables(); updateHelperButtons(); playerLog('Used Solve Random Pipe'); }
+  if (Player.solvePipe && Player.solvePipe()){ spendHelper('solve'); playerLog('Used Solve Random Pipe'); }
 });
 document.getElementById('skipPuzzleBtn').addEventListener('click', ()=>{
   if (SKIP_CHARGES <= 0) return;
-  if (Player.skipPuzzle && Player.skipPuzzle()){ SKIP_USED++; recomputeCharges(); persistConsumables(); updateHelperButtons(); playerLog('Used Skip Puzzle'); }
+  if (Player.skipPuzzle && Player.skipPuzzle()){ spendHelper('skip'); playerLog('Used Skip Puzzle'); }
 });
 
 // ===== TRYOUT MODE =====
@@ -2195,6 +2317,13 @@ function drawGrid(){
     strokePath(path, po, currentTheme.pipeShadow);
     strokePath(path, pw, cmap[color]||'#fff');
   }
+  // Partners' lines in progress
+  const now = Date.now();
+  for (const [cid, g] of COOP.ghosts){
+    if (now - g.at > COOP_GHOST_TTL){ COOP.ghosts.delete(cid); continue; }
+    ctx.save(); ctx.globalAlpha = 0.55; ctx.setLineDash([Math.max(4, CELL*0.22), Math.max(3, CELL*0.14)]);
+    strokePath(g.path, pw, cmap[g.color]||'#fff'); ctx.restore();
+  }
   // Current drawing preview
   if(STATE.active && STATE.current.length>1){
     strokePath(STATE.current, po, currentTheme.pipeShadow);
@@ -2303,13 +2432,14 @@ function isValidNextCell(y,x){
 }
 function getCellFromEvent(e) {
   const rect = canvas.getBoundingClientRect();
-  const col = Math.floor((e.clientX - rect.left) / CELL);
-  const row = Math.floor((e.clientY - rect.top) / CELL);
+  const col = Math.floor((e.clientX - rect.left - BOARD_PAD) / CELL); // the board is drawn BOARD_PAD in
+  const row = Math.floor((e.clientY - rect.top - BOARD_PAD) / CELL);
   return { row, col };
 }
 
 function applySavedPathsToBoard(){
   if (!STATE.puzzle) return;
+  if (COOP.loaded && Object.keys(COOP.entries).length){ coopApplyToBoard(); return; }
 
   const prog = getProgress(STATE.meta.slot) || {};
   const saved = (prog[STATE.meta.level] && prog[STATE.meta.level][STATE.meta.stage]) || null;
@@ -2430,11 +2560,164 @@ function clearPathForColor(color){
   delete STATE.paths[color];
 }
 
+// ----- Co-op board sync (protocol in the Co-op section above) -----
+const COOP_GHOST_TTL = 2500;   // a partner's in-progress line fades if no update arrives
+const COOP_CLAIM_MS = 1500;    // a colour a partner is dragging can't be grabbed for this long
+const COOP = { key: null, entries: {}, loaded: false, ghosts: new Map(), celebrated: false,
+               strokeTimer: null, holdTimer: null, lastStrokeSent: 0, ghostTimer: null };
+const coopCmp = (a, b) => (a.s - b.s) || (a.c < b.c ? -1 : a.c > b.c ? 1 : 0);
+const COLOR_KEY = /^[0-9a-zA-Z]$/;
+function normEntry(e){
+  if (!e || typeof e !== 'object' || !Array.isArray(e.p)) return null;
+  return { p: e.p, s: Number(e.s) || 0, c: String(e.c || '') };
+}
+function cellsAdjacentInBounds(p){
+  if (!Array.isArray(p) || !STATE.puzzle || p.length > STATE.puzzle.rows * STATE.puzzle.cols) return false;
+  for (let i = 0; i < p.length; i++){
+    const c = p[i];
+    if (!Array.isArray(c) || !Number.isInteger(c[0]) || !Number.isInteger(c[1]) || !inBounds(c[0], c[1])) return false;
+    if (i && Math.abs(c[0] - p[i-1][0]) + Math.abs(c[1] - p[i-1][1]) !== 1) return false;
+  }
+  return true;
+}
+// A finished line: endpoint to endpoint of its own colour, no repeated cells, never on another colour's endpoint.
+function validLine(color, p){
+  const eps = STATE.puzzle.start_points[color];
+  if (!eps || !Array.isArray(p) || p.length < 2 || !cellsAdjacentInBounds(p)) return false;
+  const seen = new Set();
+  for (const [y, x] of p){
+    const k = y * 1000 + x; if (seen.has(k)) return false; seen.add(k);
+    const g = STATE.puzzle.grid[y][x]; if (g !== '.' && g !== color) return false;
+  }
+  const isEp = q => eps.some(e => e[0] === q[0] && e[1] === q[1]);
+  return isEp(p[0]) && isEp(p[p.length - 1]);
+}
+// Oldest to newest; a newer line removes any older line it overlaps. Same input, same board, everywhere.
+function resolveEntries(entries){
+  const list = Object.keys(entries).filter(c => STATE.puzzle.start_points[c])
+    .map(c => [c, entries[c]]).sort((a, b) => coopCmp(a[1], b[1]) || (a[0] < b[0] ? -1 : 1));
+  const paths = {}, owner = new Map();
+  for (const [c, e] of list){
+    if (!validLine(c, e.p)) continue; // cleared ([]) or malformed
+    for (const [y, x] of e.p){
+      const o = owner.get(y * 1000 + x);
+      if (o && o !== c && paths[o]){ for (const [yy, xx] of paths[o]) owner.delete(yy * 1000 + xx); delete paths[o]; }
+    }
+    paths[c] = e.p.map(q => [q[0], q[1]]);
+    for (const [y, x] of paths[c]) owner.set(y * 1000 + x, c);
+  }
+  return paths;
+}
+function boardFilled(){
+  if (!STATE.puzzle) return false;
+  for (const c in STATE.puzzle.start_points) if (!isColorSolved(c)) return false;
+  for (let y = 0; y < STATE.puzzle.rows; y++) for (let x = 0; x < STATE.puzzle.cols; x++)
+    if (STATE.puzzle.grid[y][x] === '.' && !STATE.gridState[y][x]) return false;
+  return true;
+}
+// Show the shared state. The colour being dragged here stays local until it's dropped, and gets cut
+// short if a partner's line just landed on cells it was using.
+function coopApplyToBoard(){
+  if (!STATE.puzzle || !COOP.loaded) return;
+  const resolved = resolveEntries(COOP.entries);
+  const active = STATE.active;
+  if (active){
+    delete resolved[active];
+    const taken = new Set();
+    for (const c in resolved) for (const [y, x] of resolved[c]) taken.add(y * 1000 + x);
+    const cut = STATE.current.findIndex(([y, x]) => taken.has(y * 1000 + x));
+    if (cut > 0){ STATE.current = STATE.current.slice(0, cut); STATE.hasReachedEnd = false; }
+  }
+  STATE.paths = resolved;
+  rebuildGridStateFromPaths();
+  drawGrid();
+  if (!boardFilled()) COOP.celebrated = false;
+  else if (!COOP.celebrated) checkWin();
+}
+// Merge a server value, keeping the newer entry per colour. Whatever we hold that's newer than the
+// server's copy is sent again, so reordered or dropped writes can't leave the server behind.
+function coopMerge(key, value){
+  if (!key || key !== COOP.key) return;
+  const srv = (value && typeof value === 'object') ? value : {};
+  const resend = {};
+  for (const c of new Set([...Object.keys(srv), ...Object.keys(COOP.entries)])){
+    if (!COLOR_KEY.test(c)) continue;
+    const a = normEntry(srv[c]), b = COOP.entries[c];
+    if (a) coopSaw(a.s);
+    if (a && (!b || coopCmp(a, b) >= 0)) COOP.entries[c] = a;
+    else if (b) resend[c] = b;
+  }
+  COOP.loaded = true;
+  coopWrite(COOP.key, resend);
+  coopApplyToBoard();
+}
+// Send every colour whose line differs from the shared state. Fresh stamps make these lines win.
+// Offline, the entries still update locally and go out after the reconnect merge.
+function coopPublish(){
+  if (!COOP.key || !STATE.puzzle) return;
+  const shared = resolveEntries(COOP.entries);
+  const out = {};
+  for (const c of new Set([...Object.keys(shared), ...Object.keys(STATE.paths)])){
+    const mine = STATE.paths[c] || [];
+    if (JSON.stringify(mine) === JSON.stringify(shared[c] || [])) continue;
+    out[c] = COOP.entries[c] = { p: mine.map(q => [q[0], q[1]]), s: coopStamp(), c: COOP_CID };
+  }
+  coopWrite(COOP.key, out);
+}
+// Stream the line being dragged (throttled); partners draw it as a ghost.
+function coopSendStroke(){
+  if (!COOP.key || !STATE.active) return;
+  const wait = 66 - (Date.now() - COOP.lastStrokeSent);
+  if (wait > 0){ if (!COOP.strokeTimer) COOP.strokeTimer = setTimeout(()=>{ COOP.strokeTimer = null; coopSendStroke(); }, wait); return; }
+  COOP.lastStrokeSent = Date.now();
+  coopBounce({ t: 'stroke', key: COOP.key, color: STATE.active, path: STATE.current });
+}
+// Re-send while held, so a paused drag keeps its ghost and its claim on the colour.
+function coopHoldStroke(){
+  if (COOP.holdTimer) clearInterval(COOP.holdTimer);
+  COOP.holdTimer = setInterval(()=>{ if (STATE.active){ COOP.lastStrokeSent = 0; coopSendStroke(); } }, 800);
+}
+function coopEndStroke(color){
+  if (COOP.holdTimer){ clearInterval(COOP.holdTimer); COOP.holdTimer = null; }
+  if (COOP.strokeTimer){ clearTimeout(COOP.strokeTimer); COOP.strokeTimer = null; }
+  if (COOP.key && color) coopBounce({ t: 'end', key: COOP.key, color });
+}
+function coopRemote(d){
+  if (!STATE.puzzle || d.key !== COOP.key || typeof d.color !== 'string' || !STATE.puzzle.start_points[d.color]) return;
+  if (d.t === 'end'){ COOP.ghosts.delete(d.cid); drawGrid(); return; }
+  if (d.t !== 'stroke' || !cellsAdjacentInBounds(d.path)) return;
+  COOP.ghosts.set(d.cid, { color: d.color, path: d.path.map(q => [q[0], q[1]]), at: Date.now() });
+  drawGrid();
+  if (COOP.ghostTimer) clearTimeout(COOP.ghostTimer);
+  COOP.ghostTimer = setTimeout(()=>{ COOP.ghostTimer = null; drawGrid(); }, COOP_GHOST_TTL + 50);
+}
+function partnerHolds(color){
+  const now = Date.now();
+  for (const g of COOP.ghosts.values()) if (g.color === color && now - g.at < COOP_CLAIM_MS) return true;
+  return false;
+}
+function coopEnter(level, stage){
+  COOP.key = coopEnabled() ? wipKey(level, stage) : null;
+  COOP.entries = {}; COOP.loaded = false; COOP.ghosts.clear(); COOP.celebrated = false;
+  if (COOP.key) coopWatch(COOP.key);
+  coopAnnounce(); renderCoopPresence();
+}
+function coopLeave(){
+  COOP.key = null; COOP.ghosts.clear();
+  coopAnnounce(); renderCoopPresence();
+}
+
 // —— Stroke state
 let ACTIVE_BASELINE = null; // Set of "y,x" for the committed path cells (for the active color)
 
 canvas.addEventListener('pointerup', function(e){ if (!e.isPrimary) return; finishStroke(); });
-canvas.addEventListener('pointercancel', function(e){ if (!e.isPrimary) return; STATE.active = null; STATE.current = []; STATE.hasReachedEnd = false; ACTIVE_BASELINE=null; });
+canvas.addEventListener('pointercancel', function(e){
+  if (!e.isPrimary || !STATE.puzzle) return;
+  const color = STATE.active;
+  STATE.active = null; STATE.current = []; STATE.hasReachedEnd = false; ACTIVE_BASELINE=null;
+  rebuildGridStateFromPaths(); drawGrid();
+  if (color){ coopEndStroke(color); coopPublish(); }
+});
 canvas.addEventListener('pointerdown', function(e){
   if (!STATE.puzzle || !e.isPrimary) return;
   e.preventDefault();
@@ -2443,6 +2726,7 @@ canvas.addEventListener('pointerdown', function(e){
   if (!inBounds(row, col)) return;
   const val = STATE.puzzle.grid[row][col];
   if (val === '.') return;
+  if (partnerHolds(val)){ playerLog('Your partner is drawing that color right now.'); return; }
 
   // Select color and build a working path from the touched point
   STATE.active = val;
@@ -2466,6 +2750,7 @@ canvas.addEventListener('pointerdown', function(e){
     STATE.current = [[row, col]];
   }
   drawGrid();
+  coopSendStroke(); coopHoldStroke();
 }, { passive: false });
 // Process a single adjacent step; returns true if the path changed
 function tryStepTo(row, col){
@@ -2532,7 +2817,7 @@ canvas.addEventListener('pointermove', function(e){
     }
   }
 
-  if (changed) drawGrid();
+  if (changed){ drawGrid(); coopSendStroke(); }
 }, { passive: false });
 function rebuildGridForColor(color){
   const eps = STATE.puzzle.start_points[color] || [];
@@ -2551,6 +2836,11 @@ function rebuildGridForColor(color){
 }
 
 function finishStroke() {
+  const color = STATE.active;
+  finishStrokeLocal();
+  if (color){ coopEndStroke(color); coopPublish(); }
+}
+function finishStrokeLocal() {
   if (!STATE.active || STATE.current.length < 2) {
     STATE.active = null; STATE.current = []; STATE.hasReachedEnd = false; ACTIVE_BASELINE=null; return;
   }
@@ -2652,6 +2942,7 @@ function checkWin() {
     }
 
     // If we got here, puzzle is truly complete
+    COOP.celebrated = true;
     const banner = document.getElementById('winBanner');
     banner.classList.add('show');
     if (BANNER_TIMEOUT) clearTimeout(BANNER_TIMEOUT);
@@ -2794,6 +3085,7 @@ function unloadBoard(){
     STATE.meta.level=level||''; STATE.meta.stage=Number(stage||0); STATE.meta.slot=slot||'';
     STATE.meta.pairs = Math.max(2, Math.min(20, Number(pairs||5))); STATE.meta.seed = seed || '';
     showView('view-player');
+    coopEnter(STATE.meta.level, STATE.meta.stage);
     const token = ++LOAD_TOKEN;
     // Already built: show it now.
     const cached = PuzzleGen.peek(STATE.meta.seed, STATE.meta.pairs);
@@ -2807,7 +3099,7 @@ function unloadBoard(){
       .finally(()=>{ clearTimeout(spinner); if (token === LOAD_TOKEN) hideLoading(); });
   }
   // Leaving the player view mid-build: drop the pending load and its spinner.
-  function cancelLoad(){ LOAD_TOKEN++; hideLoading(); }
+  function cancelLoad(){ LOAD_TOKEN++; hideLoading(); coopLeave(); }
 
   // Player buttons
   function resetBoard(){
@@ -2815,6 +3107,7 @@ function unloadBoard(){
     STATE.paths={}; STATE.gridState=Array.from({length:STATE.puzzle.rows},()=> Array(STATE.puzzle.cols).fill(null));
     if (BANNER_TIMEOUT){ clearTimeout(BANNER_TIMEOUT); BANNER_TIMEOUT = null; }
     drawGrid(); document.getElementById('winBanner').classList.remove('show'); playerLog('Board reset');
+    coopPublish();
   }
   document.getElementById('resetBtn').addEventListener('click', resetBoard);
   document.getElementById('exportBtn').addEventListener('click', ()=>{
@@ -2849,12 +3142,14 @@ function unloadBoard(){
   // Board Clear: wipe only the live in-progress board (never the saved/committed progress).
   function trapScramble(){
     if (!STATE.puzzle) return false;
+    if (STATE.active) coopEndStroke(STATE.active);
     STATE.paths = {};
     STATE.gridState = Array.from({length: STATE.puzzle.rows}, ()=> Array(STATE.puzzle.cols).fill(null));
     STATE.active = null; STATE.current = []; STATE.hasReachedEnd = false; ACTIVE_BASELINE = null;
     if (BANNER_TIMEOUT){ clearTimeout(BANNER_TIMEOUT); BANNER_TIMEOUT = null; }
     document.getElementById('winBanner').classList.remove('show');
     drawGrid();
+    coopPublish();
     return true;
   }
   // Redraw the board when the soonest still-active trap expires, then reschedule for the next one.
@@ -2929,6 +3224,10 @@ function unloadBoard(){
       const isEp = (y,x)=> eps.some(p=>p[0]===y&&p[1]===x);
       for (const [y,x] of STATE.paths[c]) if (!isEp(y,x)) STATE.gridState[y][x] = c;
     }
+    if (STATE.active){
+      const eps = STATE.puzzle.start_points[STATE.active] || [];
+      for (const [y,x] of STATE.current) if (!eps.some(p=>p[0]===y&&p[1]===x)) STATE.gridState[y][x] = STATE.active;
+    }
   }
   // Solve one random unsolved pipe. Returns true if it solved one.
   function solveRandomPipe(){
@@ -2950,9 +3249,9 @@ function unloadBoard(){
     const cells = new Set(path.map(([y,x])=>y+','+x));   // Flow cells are exclusive: drop overlapping paths
     for (const c of colors){ if (c===color) continue; const p=STATE.paths[c]; if (p && p.some(([y,x])=>cells.has(y+','+x))) delete STATE.paths[c]; }
     STATE.paths[color] = path;
-    rebuildGridStateFromPaths();
     STATE.active=null; STATE.current=[]; STATE.hasReachedEnd=false; ACTIVE_BASELINE=null;
-    drawGrid(); checkWin();
+    rebuildGridStateFromPaths();
+    drawGrid(); checkWin(); coopPublish();
     return true;
   }
   // Skip the puzzle: fill the whole solution, then let the normal win path fire the check.
@@ -2964,16 +3263,18 @@ function unloadBoard(){
     for (const c of colors){ const p = buildSolutionPath(c); if (!p) return false; paths[c] = p; }
     const priorPaths = STATE.paths, priorGrid = STATE.gridState;
     STATE.paths = paths;
-    rebuildGridStateFromPaths();
     STATE.active=null; STATE.current=[]; STATE.hasReachedEnd=false; ACTIVE_BASELINE=null;
+    rebuildGridStateFromPaths();
     // Only commit (and let the caller spend a charge) if it actually registered a win. A board whose
     // canonical solution is self-parallel under strict mode would be rejected — revert and report false.
-    if (checkWin()){ drawGrid(); return true; }
+    if (checkWin()){ drawGrid(); coopPublish(); return true; }
     STATE.paths = priorPaths; STATE.gridState = priorGrid;
     return false;
   }
 
-  return { start, cancelLoad, isLoaded: ()=> !!STATE.puzzle, refreshNav: ()=> { if (STATE.meta.level) updatePrevNextButtons(); }, hydrateFromSaved: applySavedPathsToBoard, redraw: drawGrid,
+  return { start, cancelLoad, isLoaded: ()=> !!STATE.puzzle,
+           coopKey: ()=> COOP.key, coopMerge, coopRemote,
+           coopRejoin: ()=> { if (COOP.key) coopWatch(COOP.key); }, refreshNav: ()=> { if (STATE.meta.level) updatePrevNextButtons(); }, hydrateFromSaved: applySavedPathsToBoard, redraw: drawGrid,
            scramble: trapScramble, fog: trapFog, grayscale: trapGrayscale, shuffleColors: trapShuffleColors,
            solvePipe: solveRandomPipe, skipPuzzle: skipPuzzle, getMeta: ()=>({ ...STATE.meta }) };
 })();
